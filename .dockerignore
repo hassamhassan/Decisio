@@ -1,0 +1,36 @@
+# Git and env
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+# Python
+venv
+.venv
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+*.egg
+
+# Frontend (we build in Docker)
+frontend/node_modules
+frontend/dist
+
+# Docs and misc
+*.md
+*.docx
+~*
+docs/
+
+# Tests (optional: exclude to shrink image)
+# tests/
+
+# IDE
+.cursor
+.idea
+.vscode
+*.swp
+*.swo

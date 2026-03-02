@@ -1,0 +1,15 @@
+langchain-openai>=0.2.0
+langgraph
+pydantic>=2.0
+qdrant-client>=1.9.0
+sentence-transformers>=2.7.0
+fastapi>=0.110.0
+uvicorn>=0.29.0
+python-dotenv>=1.0.0
+# DB and auth (used by api.py)
+sqlalchemy[asyncio]>=2.0
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.0
+alembic>=1.13.0
+bcrypt>=4.0.0
+python-jose[cryptography]>=3.3.0

@@ -1,0 +1,330 @@
+const API_BASE = '/api';
+
+// ── Token management ───────────────────────────────────────────────
+
+export function getToken() {
+    return localStorage.getItem('decisio_token');
+}
+
+export function setToken(token) {
+    localStorage.setItem('decisio_token', token);
+}
+
+export function removeToken() {
+    localStorage.removeItem('decisio_token');
+    localStorage.removeItem('decisio_user');
+}
+
+export function getStoredUser() {
+    const u = localStorage.getItem('decisio_user');
+    return u ? JSON.parse(u) : null;
+}
+
+export function setStoredUser(user) {
+    localStorage.setItem('decisio_user', JSON.stringify(user));
+}
+
+function authHeaders() {
+    const token = getToken();
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
+async function apiFetch(url, options = {}) {
+    const headers = {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+        ...(options.headers || {}),
+    };
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401) {
+        removeToken();
+        window.location.href = '/login';
+        throw new Error('Session expired');
+    }
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        const detail = body.detail;
+        let message = `Error: ${res.status}`;
+        if (typeof detail === 'string') message = detail;
+        else if (Array.isArray(detail) && detail.length > 0) message = detail[0].msg || detail[0].message || JSON.stringify(detail[0]);
+        else if (detail && typeof detail === 'object') message = detail.msg || detail.message || JSON.stringify(detail);
+        throw new Error(message);
+    }
+    return res.json();
+}
+
+// ── Auth API ───────────────────────────────────────────────────────
+
+export async function login(email, password) {
+    const data = await apiFetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+    });
+    setToken(data.access_token);
+    setStoredUser(data.user);
+    return data;
+}
+
+export async function register(username, email, password, fullName) {
+    const data = await apiFetch(`${API_BASE}/auth/register`, {
+        method: 'POST',
+        body: JSON.stringify({
+            username, email, password, full_name: fullName, user_type: 'admin',
+        }),
+    });
+    setToken(data.access_token);
+    setStoredUser(data.user);
+    return data;
+}
+
+export async function getMe() {
+    return apiFetch(`${API_BASE}/auth/me`);
+}
+
+export function logout() {
+    removeToken();
+    window.location.href = '/login';
+}
+
+// ── Admin API ──────────────────────────────────────────────────────
+
+export async function getDashboard() {
+    return apiFetch(`${API_BASE}/admin/dashboard`);
+}
+
+export async function listUsers() {
+    return apiFetch(`${API_BASE}/admin/users`);
+}
+
+export async function createUser(data) {
+    return apiFetch(`${API_BASE}/admin/users`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function updateUser(userId, data) {
+    return apiFetch(`${API_BASE}/admin/users/${userId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function deleteUser(userId) {
+    return apiFetch(`${API_BASE}/admin/users/${userId}`, {
+        method: 'DELETE',
+    });
+}
+
+// ── Admin Equipment CRUD ───────────────────────────────────────────
+
+export async function createEquipment(data) {
+    return apiFetch(`${API_BASE}/admin/equipment`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function updateEquipment(equipmentId, data) {
+    return apiFetch(`${API_BASE}/admin/equipment/${equipmentId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function deleteEquipment(equipmentId) {
+    return apiFetch(`${API_BASE}/admin/equipment/${equipmentId}`, {
+        method: 'DELETE',
+    });
+}
+
+// ── Admin Safety Rules CRUD ────────────────────────────────────────
+
+export async function createSafetyRule(data) {
+    return apiFetch(`${API_BASE}/admin/safety-rules`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function updateSafetyRule(ruleId, data) {
+    return apiFetch(`${API_BASE}/admin/safety-rules/${ruleId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function deleteSafetyRule(ruleId) {
+    return apiFetch(`${API_BASE}/admin/safety-rules/${ruleId}`, {
+        method: 'DELETE',
+    });
+}
+
+// ── Admin Escalation CRUD ──────────────────────────────────────────
+
+export async function createEscalationLevel(data) {
+    return apiFetch(`${API_BASE}/admin/escalation-levels`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function updateEscalationLevel(levelId, data) {
+    return apiFetch(`${API_BASE}/admin/escalation-levels/${levelId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function deleteEscalationLevel(levelId) {
+    return apiFetch(`${API_BASE}/admin/escalation-levels/${levelId}`, {
+        method: 'DELETE',
+    });
+}
+
+export async function createEscalationRule(data) {
+    return apiFetch(`${API_BASE}/admin/escalation-rules`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function updateEscalationRule(ruleId, data) {
+    return apiFetch(`${API_BASE}/admin/escalation-rules/${ruleId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function deleteEscalationRule(ruleId) {
+    return apiFetch(`${API_BASE}/admin/escalation-rules/${ruleId}`, {
+        method: 'DELETE',
+    });
+}
+
+// ── Incident API ───────────────────────────────────────────────────
+
+export async function createIncident(report) {
+    return apiFetch(`${API_BASE}/incidents`, {
+        method: 'POST',
+        body: JSON.stringify({ report }),
+    });
+}
+
+export async function submitAnswer(incidentId, answer) {
+    return apiFetch(`${API_BASE}/incidents/${incidentId}/answer`, {
+        method: 'POST',
+        body: JSON.stringify({ answer }),
+    });
+}
+
+export async function generateBrief(incidentId) {
+    return apiFetch(`${API_BASE}/incidents/${incidentId}/brief`, {
+        method: 'POST',
+    });
+}
+
+export async function submitOutcome(incidentId, outcome) {
+    return apiFetch(`${API_BASE}/incidents/${incidentId}/outcome`, {
+        method: 'POST',
+        body: JSON.stringify({ outcome }),
+    });
+}
+
+export async function getIncident(incidentId) {
+    return apiFetch(`${API_BASE}/incidents/${incidentId}`);
+}
+
+export async function listIncidents() {
+    return apiFetch(`${API_BASE}/incidents`);
+}
+
+// ── Operational Data API ───────────────────────────────────────────
+
+export async function listEquipment() {
+    return apiFetch(`${API_BASE}/equipment`);
+}
+
+export async function listSafetyRules(equipmentType) {
+    const q = equipmentType ? `?equipment_type=${equipmentType}` : '';
+    return apiFetch(`${API_BASE}/safety-rules${q}`);
+}
+
+export async function getEscalationMatrix() {
+    return apiFetch(`${API_BASE}/escalation-matrix`);
+}
+
+export async function listIncidentReports() {
+    return apiFetch(`${API_BASE}/incident-reports`);
+}
+
+// ── Password Change ──────────────────────────────────────────────
+
+export async function changePassword(currentPassword, newPassword) {
+    return apiFetch(`${API_BASE}/auth/change-password`, {
+        method: 'PUT',
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+}
+
+// ── KPI Stats ────────────────────────────────────────────────────
+
+export async function getKpiStats() {
+    return apiFetch(`${API_BASE}/admin/stats/kpis`);
+}
+
+// ── Super Admin API ───────────────────────────────────────────────
+
+export async function superAdminListCompanies() {
+    return apiFetch(`${API_BASE}/super-admin/companies`);
+}
+
+export async function superAdminCreateCompany(name, slug) {
+    return apiFetch(`${API_BASE}/super-admin/companies`, {
+        method: 'POST',
+        body: JSON.stringify({ name, slug }),
+    });
+}
+
+export async function superAdminUpdateCompany(companyId, data) {
+    return apiFetch(`${API_BASE}/super-admin/companies/${companyId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function superAdminCreateCompanyAdmin(companyId, data) {
+    return apiFetch(`${API_BASE}/super-admin/companies/${companyId}/admins`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function superAdminListAdmins() {
+    return apiFetch(`${API_BASE}/super-admin/admins`);
+}
+
+export async function superAdminDeactivateAdmin(userId) {
+    return apiFetch(`${API_BASE}/super-admin/admins/${userId}/deactivate`, {
+        method: 'POST',
+    });
+}
+
+export async function superAdminUpdateAdmin(userId, data) {
+    return apiFetch(`${API_BASE}/super-admin/admins/${userId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function superAdminDeactivateCompany(companyId) {
+    return apiFetch(`${API_BASE}/super-admin/companies/${companyId}/deactivate`, {
+        method: 'POST',
+    });
+}
+
+export async function superAdminActivateCompany(companyId) {
+    return apiFetch(`${API_BASE}/super-admin/companies/${companyId}/activate`, {
+        method: 'POST',
+    });
+}

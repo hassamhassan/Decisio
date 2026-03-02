@@ -1,0 +1,39 @@
+# Decisio — deploy WITHOUT vector store (PostgreSQL + API + frontend only)
+# Retrieval agent is disabled; the app uses LLM-only reasoning.
+# Usage: docker compose -f docker-compose.no-vectorstore.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: decisio-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: decisio
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d decisio"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    container_name: decisio-api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/decisio
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      WS_BASE_URL: ${WS_BASE_URL:-http://localhost:8000}
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
