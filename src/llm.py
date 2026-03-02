@@ -19,20 +19,7 @@ _DEFAULT_MODEL = "llama-3.3-70b-versatile"
 _DEFAULT_TEMPERATURE = 0.2
 
 
-def get_llm(
-    model: str | None = None,
-    temperature: float | None = None,
-) -> ChatGroq:
-    """Return a ChatGroq instance.
-
-    Parameters
-    ----------
-    model : str, optional
-        Groq model name.  Falls back to ``GROQ_MODEL`` env var, then
-        ``llama-3.3-70b-versatile``.
-    temperature : float, optional
-        Sampling temperature. Falls back to 0.2.
-    """
+def _build_llm(model: str | None, temperature: float | None) -> ChatGroq:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise EnvironmentError(
@@ -44,3 +31,22 @@ def get_llm(
         model=model or os.getenv("GROQ_MODEL", _DEFAULT_MODEL),
         temperature=temperature if temperature is not None else _DEFAULT_TEMPERATURE,
     )
+
+
+def get_llm(
+    model: str | None = None,
+    temperature: float | None = None,
+) -> ChatGroq:
+    """General-purpose LLM factory used by most agents."""
+    return _build_llm(model, temperature)
+
+
+def get_llm_for_brief(
+    model: str | None = None,
+    temperature: float | None = None,
+) -> ChatGroq:
+    """Specialized LLM for Decision Brief generation.
+
+    Currently uses the same defaults as `get_llm`, but split for future tuning.
+    """
+    return _build_llm(model, temperature)
