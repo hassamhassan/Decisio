@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { createIncident, submitAnswer, submitOutcome, generateBrief, logout } from './api'
+import { createIncident, submitAnswer, submitOutcome, generateBrief, logout, getStoredUser } from './api'
+import EscalationChat from './EscalationChat'
 
 const CATEGORY_LABELS = {
     trigger: 'Trigger',
@@ -18,10 +19,14 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
     const [messages, setMessages] = useState([])
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(false)
-    const [phase, setPhase] = useState('idle') // idle | diagnosing | brief | outcome | closed
+    const [phase, setPhase] = useState('idle') // idle | diagnosing | brief | outcome | escalation_chat | closed
     const [incident, setIncident] = useState(null)
+    const [escalationSession, setEscalationSession] = useState(null) // { session_id, ws_url }
+    const [chatMinimized, setChatMinimized] = useState(false)
     const chatRef = useRef(null)
     const inputRef = useRef(null)
+
+    const storedUser = getStoredUser()
 
     useEffect(() => {
         if (chatRef.current) {
@@ -154,7 +159,14 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                     if (data.escalation) {
                         addMessage('system', { type: 'escalation', data: data.escalation })
                     }
-                    setPhase('closed')
+                    // Open escalation chat instead of closing
+                    if (data.escalation?.session_id) {
+                        setEscalationSession(data.escalation)
+                        setChatMinimized(false)
+                        setPhase('escalation_chat')
+                    } else {
+                        setPhase('closed')
+                    }
                 } else {
                     addMessage('system', { type: 'status', data })
                     // Failure — stay in outcome for retry
@@ -170,6 +182,8 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
     const handleNewIncident = () => {
         setMessages([])
         setIncident(null)
+        setEscalationSession(null)
+        setChatMinimized(false)
         setPhase('idle')
         setInput('')
     }
@@ -198,12 +212,22 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                             <span>Confidence: {Math.round((incident.confidence || 0) * 100)}%</span>
                         </>
                     )}
-                    {phase === 'closed' && (
+                    {(phase === 'closed' || phase === 'escalation_chat') && (
                         <button className="btn btn-outline" onClick={handleNewIncident} style={{ padding: '6px 12px', fontSize: '12px' }}>
                             + New Incident
                         </button>
                     )}
                     <div className="header-user-area">
+                        {/* Chat button — visible to all roles except viewer */}
+                        {user?.user_type !== 'viewer' && escalationSession?.session_id && chatMinimized && (
+                            <button
+                                className="btn btn-outline btn-sm"
+                                onClick={() => setChatMinimized(false)}
+                                style={{ borderColor: '#06b6d4', color: '#06b6d4' }}
+                            >
+                                💬 Chat
+                            </button>
+                        )}
                         <span className="header-username">{user?.full_name || user?.username}</span>
                         {user?.user_type === 'super_admin' && (
                             <button className="btn btn-outline btn-sm" onClick={onSuperAdmin} style={{ borderColor: '#7c3aed', color: '#7c3aed' }}>Super Admin</button>
@@ -254,8 +278,20 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                 )}
             </div>
 
+            {/* Escalation Chat Panel */}
+            {escalationSession?.session_id && user?.user_type !== 'viewer' && (
+                <EscalationChat
+                    sessionId={escalationSession.session_id}
+                    companyId={storedUser?.company_id}
+                    userId={storedUser?.id}
+                    userRole={user?.user_type}
+                    minimized={chatMinimized}
+                    onMinimize={() => setChatMinimized(prev => !prev)}
+                />
+            )}
+
             {/* Input Area */}
-            {phase !== 'closed' && (
+            {phase !== 'closed' && phase !== 'escalation_chat' && (
                 <div className="input-area">
                     <form className="input-row" onSubmit={handleSubmit}>
                         <textarea

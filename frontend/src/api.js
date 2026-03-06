@@ -328,3 +328,21 @@ export async function superAdminActivateCompany(companyId) {
         method: 'POST',
     });
 }
+
+// ── Escalation Chat API ──────────────────────────────────────────
+
+export async function getEscalationMessages(sessionId) {
+    return apiFetch(`${API_BASE}/escalation/sessions/${sessionId}/messages`);
+}
+
+export async function closeEscalationSession(sessionId) {
+    return apiFetch(`${API_BASE}/escalation/sessions/${sessionId}/close`, {
+        method: 'POST',
+    });
+}
+
+export function getWsBaseUrl() {
+    const loc = window.location;
+    const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${loc.host}`;
+}

@@ -218,8 +218,7 @@ def question_agent(state: DecisioState) -> DecisioState:
     try:
         questions_raw = json.loads(raw_content)
     except json.JSONDecodeError:
-        # Fallback: generate framework-appropriate questions
-        questions_raw =     _fallback_questions(current_step, step_category)
+        raise ValueError(f"LLM did not return valid JSON: {raw_content}")
 
     # ── Validate through Pydantic ────────────────────────────────────
     validated_questions: list[dict] = []
@@ -278,14 +277,7 @@ def question_agent(state: DecisioState) -> DecisioState:
 
     # Guarantee at least one question
     if not validated_questions:
-        fallback = Question(
-            question=f"Can you describe the current status related to {step_label}?",
-            category=step_category,
-            diagnostic_step=current_step,
-            rationale=f"Baseline question for diagnostic step {current_step}.",
-            expected_answer_type="free_text",
-        )
-        validated_questions.append(fallback.model_dump())
+        raise ValueError("LLM generated questions, but none were valid or all were duplicates.")
 
     # ── Track completed steps + increment count ──────────────────────
     steps_completed = list(state.get("diagnostic_steps_completed") or [])
@@ -304,60 +296,3 @@ def question_agent(state: DecisioState) -> DecisioState:
     }
 
 
-# ── Fallback questions per framework step ────────────────────────────
-
-def _fallback_questions(step: int, category: str) -> list[dict]:
-    """Return sensible fallback questions for each diagnostic step."""
-    fallbacks = {
-        1: [
-            {"question": "What was the initial alarm or trigger that alerted you to the problem?", "category": "trigger_condition", "diagnostic_step": 1, "rationale": "Identify the triggering event.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-            {"question": "When exactly did the trigger event occur?", "category": "trigger_condition", "diagnostic_step": 1, "rationale": "Establish timeline.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-            {"question": "Was this trigger expected or unexpected?", "category": "trigger_condition", "diagnostic_step": 1, "rationale": "Determine if the event was anticipated.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-        ],
-        2: [
-            {"question": "Are there any visible signs of damage on the equipment (leaks, unusual noise, vibration)?", "category": "internal_equipment", "diagnostic_step": 2, "rationale": "Check physical condition.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-            {"question": "When was the last maintenance performed on this equipment?", "category": "internal_equipment", "diagnostic_step": 2, "rationale": "Assess maintenance history.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-            {"question": "Is the equipment still running or has it shut down?", "category": "internal_equipment", "diagnostic_step": 2, "rationale": "Determine operational state.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-        ],
-        3: [
-            {"question": "Are the upstream feed systems operating normally?", "category": "upstream_equipment", "diagnostic_step": 3, "rationale": "Check upstream dependencies.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-            {"question": "Have there been any changes to upstream supply conditions recently?", "category": "upstream_equipment", "diagnostic_step": 3, "rationale": "Identify upstream changes.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-            {"question": "Is the upstream flow rate and pressure within normal range?", "category": "upstream_equipment", "diagnostic_step": 3, "rationale": "Verify upstream parameters.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-        ],
-        4: [
-            {"question": "Are downstream processes or consumers experiencing any issues?", "category": "downstream_equipment", "diagnostic_step": 4, "rationale": "Check downstream impact.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-            {"question": "Is there any back-pressure from downstream systems?", "category": "downstream_equipment", "diagnostic_step": 4, "rationale": "Identify back-pressure issues.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-            {"question": "Have downstream systems been isolated or are they still connected?", "category": "downstream_equipment", "diagnostic_step": 4, "rationale": "Determine isolation status.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-        ],
-        5: [
-            {"question": "Are DCS/PLC/SCADA systems showing any alarms or faults?", "category": "control_system", "diagnostic_step": 5, "rationale": "Check control system status.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-            {"question": "Have any control setpoints been changed recently?", "category": "control_system", "diagnostic_step": 5, "rationale": "Identify recent changes.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-            {"question": "Are control valves and actuators responding correctly to commands?", "category": "control_system", "diagnostic_step": 5, "rationale": "Verify control loop integrity.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-        ],
-        6: [
-            {"question": "Are all relevant sensors and transmitters reading within expected ranges?", "category": "instrumentation", "diagnostic_step": 6, "rationale": "Verify instrument accuracy.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-            {"question": "When were the instruments last calibrated?", "category": "instrumentation", "diagnostic_step": 6, "rationale": "Check calibration status.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-            {"question": "Are there any instrument readings that seem inconsistent with each other?", "category": "instrumentation", "diagnostic_step": 6, "rationale": "Detect contradictory readings.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-        ],
-        7: [
-            {"question": "Are all utilities (power, air, steam, cooling water) available and stable?", "category": "utilities", "diagnostic_step": 7, "rationale": "Verify utility supply.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-            {"question": "Have there been any utility supply interruptions recently?", "category": "utilities", "diagnostic_step": 7, "rationale": "Check for utility disruptions.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-            {"question": "Are utility parameters (pressure, voltage, temperature) within spec?", "category": "utilities", "diagnostic_step": 7, "rationale": "Verify utility parameters.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-        ],
-        8: [
-            {"question": "Are current process parameters (flow, pressure, temperature) within normal operating range?", "category": "process_conditions", "diagnostic_step": 8, "rationale": "Verify process parameters.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-            {"question": "Have there been any recent changes to process feed composition or operating conditions?", "category": "process_conditions", "diagnostic_step": 8, "rationale": "Identify process changes.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-            {"question": "Are there any abnormal process trends visible in the historian?", "category": "process_conditions", "diagnostic_step": 8, "rationale": "Check process trends.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-        ],
-        9: [
-            {"question": "Were all relevant operating procedures followed before and during the incident?", "category": "procedure_human", "diagnostic_step": 9, "rationale": "Check procedural compliance.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-            {"question": "Was there a recent shift change or handover before the incident occurred?", "category": "procedure_human", "diagnostic_step": 9, "rationale": "Assess handover quality.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-            {"question": "Were any manual interventions or overrides performed recently?", "category": "procedure_human", "diagnostic_step": 9, "rationale": "Identify human actions.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-        ],
-        10: [
-            {"question": "Has the identified root cause been fully addressed?", "category": "verification_closure", "diagnostic_step": 10, "rationale": "Confirm root cause resolution.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-            {"question": "Is the system currently stable and operating within normal parameters?", "category": "verification_closure", "diagnostic_step": 10, "rationale": "Verify system stability.", "expected_answer_type": "yes_no", "blocking_safety_flag": False},
-            {"question": "Are there any remaining actions or monitoring steps needed before closure?", "category": "verification_closure", "diagnostic_step": 10, "rationale": "Identify outstanding items.", "expected_answer_type": "free_text", "blocking_safety_flag": False},
-        ],
-    }
-    return fallbacks.get(step, fallbacks[1])

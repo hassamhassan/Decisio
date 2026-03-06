@@ -1,165 +1,166 @@
 # Decisio — Operational Cost per Client (Monthly) — Gemini
 
-**Scope:** Running costs only (no development/build). Assumes **Google Gemini API** for chat/completion and **Gemini Embedding** for retrieval.
-
-**Model mix:** **Gemini 2.0 Pro** (or 2.5 Pro) for **all** chat agents; **Gemini Embedding** for vector search when enabled.
-
-**Deployment assumption:** **Shared everything** — shared hosting, shared database, shared memory/storage, shared monitoring and DevOps. All infrastructure is multi-tenant; cost per client = total shared cost ÷ number of clients (e.g. 10–20 clients per server/DB). Lower per-client cost; no dedicated resources.
+> **Billing model:** We charge **per client** (company). Each client can have **many users** — the cost stays the same regardless of users within a client.  
+> **LLM:** Google **Gemini 2.0 Pro / 2.5 Pro** (all agents) + **gemini-embedding-001** (retrieval).  
+> **Deployment:** One **shared stack** for all clients.
 
 ---
 
-## Definitions: Fixed vs Usage-Based, Shared vs Dedicated
+## Part A — Mandatory Fixed Costs (You Pay These No Matter What)
 
-### Fixed cost
-- **Meaning:** You pay the **same amount each month** regardless of how much the client uses the system.
-- **Example:** A server that costs $80/month costs $80 whether the client has 10 incidents or 500 incidents.
+These costs exist as soon as your stack is running, even with **zero clients**. They do **not** change with client count or usage.
 
-### Usage-based cost
-- **Meaning:** The bill **goes up or down with usage** (more usage → higher cost).
-- **Example:** Gemini API: more incidents → more LLM calls → higher AI cost.
+| # | Item | What It Covers | Monthly Cost |
+|---|------|---------------|-------------|
+| 1 | **App Server (Hosting)** | API + frontend server | $50–80 |
+| 2 | **Database (PostgreSQL)** | Shared DB instance | $30–60 |
+| 3 | **Vector Database** | Qdrant for RAG embeddings | $20–50 |
+| 4 | **Monitoring & Alerts** | Logging, metrics, alerting tools | $20–50 |
+| 5 | **CI/CD Tooling** | GitHub Actions / pipeline runner costs | $10–30 |
+| 6 | **Other (Backups, SSL, DNS)** | Backups, certificates, domain | $10–20 |
+| | **Total Fixed (Base Overhead)** | | **≈ $140–290/month** |
 
-### Shared
-- **Meaning:** **One server or database serves multiple clients.** Cost is divided across clients. **Lower per client**, no isolation.
-
-### Dedicated
-- **Meaning:** **One server or database per client.** **Higher per client**, isolated (performance, security, SLA).
-
----
-
-## 1. Infrastructure Cost per Client (Shared Everything)
-
-All infrastructure is **shared** across clients: one app server, one database, shared storage/memory. Per-client cost = total monthly cost of shared stack ÷ number of clients (e.g. 15 clients).
-
-| Component | Description | Cost type | Shared total (example) | Per client (÷15 clients) |
-|-----------|-------------|-----------|-------------------------|---------------------------|
-| **Hosting** | App server (API + frontend) | **Fixed** | $50–80/month | **$3–6** |
-| **Server usage / memory** | CPU, RAM (shared) | **Fixed** | Included in hosting | — |
-| **Storage** | Logs, backups, assets (shared) | **Usage-based** (small) | $5–15/month | **$0.50–1.50** |
-| **Database** | PostgreSQL (shared instance) | **Fixed** | $30–60/month | **$2–4** |
-
-**Is the cost fixed or usage-based?**  
-**Fixed (per client):** Your share of hosting and database is fixed each month for that client count. **Usage-based:** Storage and AI (Gemini) scale with usage.
-
-**Infrastructure per client (monthly, shared everything):** **$6–12** (assuming 10–20 clients sharing one server + one DB).
+> **Simplified base:** For calculations below we use **≈ $200/month** as the midpoint base overhead.
 
 ---
 
-## 2. AI Usage Cost (Gemini)
+## Part B — Per-Client Variable Costs (Scale With Number of Clients)
 
-### 2.1 Assumed Gemini pricing (reference)
+These costs **increase** as you add more clients. They fall into two categories:
 
-| Product | Model | Input (per 1M tokens) | Output (per 1M tokens) |
-|---------|--------|------------------------|------------------------|
-| Chat | **Gemini 2.0 Pro** / **2.5 Pro** (all agents) | $1.25 | $5.00 |
-| Embedding | **gemini-embedding-001** | $0.15 | — |
+### B1. Extra Infrastructure per Client
 
-*Source: [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing). Verify current rates before finalizing pricing.*
+Each additional client adds a small load to the shared stack (more CPU/RAM, more storage).
 
-### 2.2 Token estimates per agent call (same as OpenAI doc)
+| Item | Per Client / Month |
+|------|-------------------|
+| Extra CPU / RAM share | ~$3–5 |
+| Extra storage (logs, backups, assets) | ~$1–3 |
+| **Subtotal extra infra per client** | **≈ $5/month** |
 
-| Agent | Est. input (tokens) | Est. output (tokens) |
+### B2. AI Cost per Client (Gemini — Usage-Based)
+
+AI cost depends on how many **incidents** a client generates per month.
+
+**Gemini pricing reference:**
+
+| Model | Input (per 1M tokens) | Output (per 1M tokens) |
 |-------|----------------------|----------------------|
+| Gemini 2.0 Pro / 2.5 Pro | $1.25 | $5.00 |
+| gemini-embedding-001 | $0.15 | — |
+
+**Cost per incident:** Each incident triggers ~22 agent calls → **≈ $0.08 per incident**.
+
+| Usage Level | Incidents / Month | AI Cost / Month |
+|-------------|-------------------|----------------|
+| **Low** | 20 | **~$1.54** |
+| **Medium** | 80 | **~$6.16** |
+| **High** | 250 | **~$19.25** |
+
+### B3. Support Cost per Client
+
+| Usage Level | Support Hours / Month | Cost @ $40–60/hr | Support Cost / Month |
+|-------------|----------------------|------------------|---------------------|
+| **Low** | 0.5–1 hr | $40–60 | **$20–60** |
+| **Medium** | 1–2 hr | $40–60 | **$40–120** |
+| **High** | 2–4 hr | $40–60 | **$80–240** |
+
+---
+
+## Cost Summary — Per Client at Different Client Counts
+
+### Formula
+
+```
+Per-client cost = (Base Overhead ÷ N clients) + Extra Infra per client + AI cost + Support cost
+```
+
+Using: Base = $200/month, Extra infra = $5/client
+
+---
+
+### Low Usage (20 incidents/month, minimal support)
+
+| Clients | Infra+Ops Share | AI Cost | Support | **Total / Client / Month** |
+|---------|----------------|---------|---------|---------------------------|
+| **0** | $200 total (idle stack, no clients) | — | — | **$200 total overhead** |
+| **5** | $45.00 | $1.54 | $20–60 | **$67 – $107** |
+| **10** | $25.00 | $1.54 | $20–60 | **$47 – $87** |
+| **20** | $15.00 | $1.54 | $20–60 | **$37 – $77** |
+| **50** | $9.00 | $1.54 | $20–60 | **$31 – $71** |
+| **100** | $7.00 | $1.54 | $20–60 | **$29 – $69** |
+
+---
+
+### Medium Usage (80 incidents/month, moderate support)
+
+| Clients | Infra+Ops Share | AI Cost | Support | **Total / Client / Month** |
+|---------|----------------|---------|---------|---------------------------|
+| **0** | $200 total (idle stack, no clients) | — | — | **$200 total overhead** |
+| **5** | $45.00 | $6.16 | $40–120 | **$91 – $171** |
+| **10** | $25.00 | $6.16 | $40–120 | **$71 – $151** |
+| **20** | $15.00 | $6.16 | $40–120 | **$61 – $141** |
+| **50** | $9.00 | $6.16 | $40–120 | **$55 – $135** |
+| **100** | $7.00 | $6.16 | $40–120 | **$53 – $133** |
+
+---
+
+### High Usage (250 incidents/month, heavy support)
+
+| Clients | Infra+Ops Share | AI Cost | Support | **Total / Client / Month** |
+|---------|----------------|---------|---------|---------------------------|
+| **0** | $200 total (idle stack, no clients) | — | — | **$200 total overhead** |
+| **5** | $45.00 | $19.25 | $80–240 | **$144 – $304** |
+| **10** | $25.00 | $19.25 | $80–240 | **$124 – $284** |
+| **20** | $15.00 | $19.25 | $80–240 | **$114 – $274** |
+| **50** | $9.00 | $19.25 | $80–240 | **$108 – $268** |
+| **100** | $7.00 | $19.25 | $80–240 | **$106 – $266** |
+
+---
+
+## Quick Reference — Cost Type Cheat Sheet
+
+| Cost | Fixed or Variable? | Shared or Per-Client? |
+|------|-------------------|----------------------|
+| App Server / Hosting | ✅ Fixed | Shared — split across clients |
+| Database (PostgreSQL) | ✅ Fixed | Shared — split across clients |
+| Vector Database | ✅ Fixed | Shared — split across clients |
+| Monitoring & Alerts | ✅ Fixed | Shared — split across clients |
+| CI/CD Tooling | ✅ Fixed | Shared — split across clients |
+| Backups, SSL, DNS | ✅ Fixed | Shared — split across clients |
+| Extra CPU/RAM per client | 📈 Scales with clients | Per client (~$5) |
+| AI (Gemini) | 📈 Scales with usage | Per client (by incidents) |
+| Support | 📈 Scales with usage | Per client (by hours) |
+
+---
+
+## Key Takeaways
+
+1. **With 0 clients** you still pay **~$200/month** if the stack is running (turn it off to pay $0).
+2. **The more clients you have, the cheaper it gets per client** — the fixed $200 base gets split.
+3. **AI cost is very cheap** (~$0.08/incident) — even at 250 incidents/month it's only ~$19.
+4. **Support is the largest variable cost** — optimize it with self-service tools, good docs, and automation.
+5. **At 100 clients (medium usage)**, you're looking at roughly **$53–$133 per client/month**.
+6. **One client = one company** with unlimited users. We don't charge per user.
+
+---
+
+## Appendix — Token Estimates per Agent Call
+
+| Agent | Input Tokens | Output Tokens |
+|-------|-------------|--------------|
 | Incident intake | 800 | 250 |
 | Screening | 600 | 150 |
 | Question generation | 1,800 | 400 |
 | Answer interpreter | 1,000 | 300 |
 | Hypothesis update | 1,500 | 400 |
 | Safety constraint | 1,500 | 350 |
-| **Decision brief** | **2,200** | **700** |
+| Decision brief | 2,200 | 700 |
 | Escalation | 1,800 | 500 |
 | Outcome capture | 1,200 | 350 |
 | Memory write | 800 | 200 |
 | Expert capture | 1,000 | 300 |
 
-### 2.3 Cost per incident (Gemini Pro for all agents)
-
-**Model:** **Gemini 2.0 Pro** (or 2.5 Pro) for **all** chat agents.
-
-- **All chat (~22 calls, Pro):** ~22 × (1,400 × $1.25/1M + 350 × $5/1M) ≈ **$0.077** per incident (about **7.7 cents**).
-- **Embedding (if used):** ~500 × $0.15/1M ≈ negligible.
-- **Total AI per incident (Pro for all) ≈ $0.077** (round to **~$0.08**).
-
-### 2.4 Average cost per request and requests per client per month
-
-**Average cost per (LLM) request** with Gemini Pro for all: **~$0.0035** per call (blended).
-
-| Scenario | Incidents/month | Chat calls (approx) | Embedding calls (approx) |
-|----------|------------------|----------------------|---------------------------|
-| **Low** | 20 | ~500 | ~20 |
-| **Medium** | 80 | ~2,000 | ~80 |
-| **High** | 250 | ~6,000 | ~250 |
-
-### 2.5 Estimated total AI cost per client per month (Gemini)
-
-**Model:** Gemini 2.0 Pro (or 2.5 Pro) for **all** chat agents; gemini-embedding-001 when retrieval is used.
-
-| Scenario | Incidents | Cost per incident (AI) | Total AI/month |
-|----------|-----------|--------------------------|----------------|
-| Low | 20 | ~$0.08 | **~$1.54** |
-| Medium | 80 | ~$0.08 | **~$6.16** |
-| High | 250 | ~$0.08 | **~$19.25** |
-
 ---
 
-## 3. Support Cost
-
-| Item | Low | Medium | High |
-|------|-----|--------|------|
-| **Support hours per client/month** | 0.5–1 | 1–2 | 2–4 |
-| **Cost per hour (fully loaded)** | $40–60 | $40–60 | $40–60 |
-| **Support cost per client/month** | **$20–60** | **$40–120** | **$80–240** |
-
----
-
-## 4. Ongoing Operational Maintenance (Shared)
-
-Monitoring, updates, DevOps, and other ops are **shared** across all clients (one team, one tooling stack). Per-client share = total ops cost ÷ number of clients.
-
-| Item | Description | Shared total (example) | Per client (÷15 clients) |
-|------|-------------|--------------------------|---------------------------|
-| **Monitoring** | Logging, metrics, alerts (one account) | $20–50/month | **$1.50–3.50** |
-| **Updates** | OS, deps, security (one stack) | Included in DevOps | — |
-| **DevOps** | CI/CD, releases, incident response (amortized) | $100–200/month | **$7–14** |
-| **Other** | Backups, SSL, DNS | $10–20/month | **$1–1.50** |
-
-**Total ongoing ops (per client, shared):** **$10–20/month**.
-
----
-
-## 5. Total Monthly Cost per Client — Summary (Gemini, Shared Everything)
-
-**Pricing basis:** Gemini 2.0 Pro (or 2.5 Pro) for **all** chat agents; Gemini Embedding when retrieval is used. **Infrastructure and ops:** shared hosting, shared DB, shared memory/storage, shared monitoring and DevOps (per-client share as above, ~15 clients).
-
-| Cost category | Low usage | Medium usage | High usage |
-|---------------|-----------|--------------|------------|
-| Infrastructure (shared) | $6–12 | $6–12 | $6–12 |
-| AI (Gemini) | ~$1.54 | ~$6.16 | ~$19.25 |
-| Support | $20–60 | $40–120 | $80–240 |
-| Ongoing ops (shared) | $10–20 | $10–20 | $10–20 |
-| **Total per client/month** | **$38–93** | **$63–158** | **$116–292** |
-
----
-
-## 6. Model Assumption for This Pricing (Gemini)
-
-| Use case | Model | Note |
-|----------|--------|------|
-| **All agents (chat)** | **Gemini 2.0 Pro** or **2.5 Pro** | Single model for all agents (intake, screening, questions, answer interpreter, hypothesis, safety, decision brief, escalation, outcome, memory, expert capture). |
-| **Embedding (retrieval)** | **gemini-embedding-001** | When vector store is enabled; cost small at typical volumes. |
-
----
-
-## Quick reference (Shared Everything)
-
-| Cost category | Fixed or usage-based? | In this doc |
-|----------------------|------------------------|--------------|
-| **Hosting / server** | Fixed | **Shared** — per client $3–6 |
-| **Database** | Fixed | **Shared** — per client $2–4 |
-| **Storage / memory** | Usage-based (small) | **Shared** — per client ~$0.50–1.50 |
-| **AI (Gemini)** | Usage-based | By usage (same as before) |
-| **Support** | By your model | Unchanged |
-| **Monitoring / DevOps** | Fixed (amortized) | **Shared** — per client $10–20 |
-
----
-
-*Pricing and token estimates are indicative. Recalculate using your actual usage and current [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).*
+*All pricing and token estimates are indicative. Verify with your actual usage and current [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing) before finalizing commercial pricing.*
