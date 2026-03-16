@@ -28,9 +28,22 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))  # 8 h
 # super_admin: platform-wide superuser (no company scope)
 # admin: company admin
 # operator / engineer / viewer: standard company roles
-# escalation_owner: specialist responsible for handling escalations
+# Escalation handlers use dynamic types from escalation levels (L1, L2, L3, ...)
 
-USER_TYPES = ["super_admin", "admin", "operator", "engineer", "viewer", "escalation_owner", "expert"]
+USER_TYPES = ["super_admin", "admin", "operator", "engineer", "viewer"]
+
+# Legacy role names kept for backward compat with existing DB records
+_LEGACY_ESCALATION_TYPES = {"expert", "escalation_owner"}
+
+import re
+_ESCALATION_RE = re.compile(r"^L\d+$")  # L1, L2, L3, ...
+
+
+def is_escalation_type(user_type: str) -> bool:
+    """Check if a user_type is an escalation-level role (L1, L2, ...) or legacy expert/escalation_owner."""
+    if not user_type:
+        return False
+    return bool(_ESCALATION_RE.match(user_type)) or user_type in _LEGACY_ESCALATION_TYPES
 
 # ── Password hashing ───────────────────────────────────────────────
 

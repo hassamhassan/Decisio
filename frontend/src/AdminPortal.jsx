@@ -1,14 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
     getDashboard, listUsers, createUser, updateUser, deleteUser,
     listEquipment, listSafetyRules, getEscalationMatrix, listIncidentReports,
-    listIncidents, logout, getStoredUser,
+    listIncidents, getIncident, logout, getStoredUser,
     createEquipment, updateEquipment, deleteEquipment,
     createSafetyRule, updateSafetyRule, deleteSafetyRule,
     createEscalationLevel, updateEscalationLevel, deleteEscalationLevel,
     createEscalationRule, updateEscalationRule, deleteEscalationRule,
-    changePassword, getKpiStats,
+    changePassword, getKpiStats, getEscalationSessions,
+    getAdminNotifications, markNotificationRead, markAllNotificationsRead,
 } from './api'
+import EscalationChat from './EscalationChat'
 
 const SECTIONS = [
     { id: 'dashboard', label: '📊 Dashboard', icon: '📊' },
@@ -17,6 +19,7 @@ const SECTIONS = [
     { id: 'equipment', label: '📦 Equipment', icon: '📦' },
     { id: 'safety', label: '🛡️ Safety Rules', icon: '🛡️' },
     { id: 'escalation', label: '📈 Escalation', icon: '📈' },
+    { id: 'live', label: '💬 Live Chats', icon: '💬' },
     { id: 'reports', label: '📋 Reports', icon: '📋' },
 ]
 
@@ -25,11 +28,51 @@ const TYPE_COLORS = {
     operator: '#3b82f6',
     engineer: '#10b981',
     viewer: '#8b5cf6',
+    expert: '#f97316',
     escalation_owner: '#f97316',
-    expert: '#06b6d4',
 }
 function userTypeColor(userType) {
+    if (/^L\d+$/.test(userType)) return '#f97316'
     return TYPE_COLORS[userType] ?? '#64748b'
+}
+
+function NotificationDropdown({ notifications, onNotifClick, onMarkAll }) {
+    const unread = notifications.filter(n => !n.is_read)
+    const read = notifications.filter(n => n.is_read)
+    const shown = [...unread, ...read].slice(0, 20)
+
+    return (
+        <div className="notif-dropdown">
+            <div className="notif-dropdown-header">
+                <span>Notifications</span>
+                {unread.length > 0 && (
+                    <button type="button" className="notif-mark-all-btn" onClick={onMarkAll}>
+                        Mark all read
+                    </button>
+                )}
+            </div>
+            {shown.length === 0 && (
+                <div className="notif-empty">No notifications</div>
+            )}
+            {shown.map(n => (
+                <button
+                    key={n.id}
+                    type="button"
+                    className={`notif-item ${n.is_read ? 'notif-read' : 'notif-unread'}`}
+                    onClick={() => onNotifClick(n)}
+                >
+                    <div className="notif-item-title">{n.title}</div>
+                    <div className="notif-item-msg">{n.message}</div>
+                    <div className="notif-item-meta">
+                        {n.incident_id && <span className="notif-incident-id">#{n.incident_id.slice(0, 8)}</span>}
+                        <span className="notif-time">
+                            {n.created_at ? new Date(n.created_at).toLocaleString() : ''}
+                        </span>
+                    </div>
+                </button>
+            ))}
+        </div>
+    )
 }
 
 export default function AdminPortal() {
@@ -40,6 +83,121 @@ export default function AdminPortal() {
     const [pwError, setPwError] = useState('')
     const [pwSuccess, setPwSuccess] = useState('')
     const user = getStoredUser()
+
+    // ── Notifications ──────────────────────────────────────────────
+    const [notifications, setNotifications] = useState([])
+    const [notifOpen, setNotifOpen] = useState(false)
+    const notifRef = useRef(null)
+
+    const unreadCount = notifications.filter(n => !n.is_read).length
+
+    const fetchNotifications = useCallback(async () => {
+        try {
+            const data = await getAdminNotifications()
+            setNotifications(data.notifications || [])
+        } catch {
+            // non-critical — swallow silently
+        }
+    }, [])
+
+    // Initial load via REST
+    useEffect(() => {
+        fetchNotifications()
+    }, [fetchNotifications])
+
+    // Live updates via WebSocket notification channel (no polling)
+    useEffect(() => {
+        const stored = getStoredUser()
+        const companyId = stored?.company_id
+        if (!companyId) return
+
+        let ws = null
+        let reconnectTimer = null
+        let attempt = 0
+
+        const getWsBase = () => {
+            const loc = window.location
+            const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:'
+            return `${proto}//${loc.host}`
+        }
+
+        const connect = () => {
+            const token = localStorage.getItem('decisio_token')
+            if (!token) return
+            const url = `${getWsBase()}/ws/notifications/${companyId}?token=${encodeURIComponent(token)}`
+            ws = new WebSocket(url)
+
+            ws.onopen = () => {
+                attempt = 0
+            }
+            ws.onmessage = (evt) => {
+                try {
+                    const data = JSON.parse(evt.data)
+                    if (data.type === 'admin_notification' && data.notification) {
+                        setNotifications(prev => {
+                            const existingIds = new Set(prev.map(n => n.id))
+                            if (existingIds.has(data.notification.id)) return prev
+                            return [data.notification, ...prev]
+                        })
+                    }
+                    if (data.type === 'ping') {
+                        ws.send(JSON.stringify({ type: 'pong' }))
+                    }
+                } catch {
+                    // ignore parse errors
+                }
+            }
+            ws.onclose = () => {
+                ws = null
+                const backoffMs = Math.min(30000, 2000 * Math.pow(2, attempt)) + Math.random() * 1000
+                attempt += 1
+                reconnectTimer = setTimeout(connect, backoffMs)
+            }
+            ws.onerror = () => {
+                // handled by onclose
+            }
+        }
+
+        connect()
+        return () => {
+            if (reconnectTimer) clearTimeout(reconnectTimer)
+            if (ws) {
+                ws.onclose = null
+                ws.close()
+            }
+        }
+    }, [])
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        function handleClick(e) {
+            if (notifRef.current && !notifRef.current.contains(e.target)) {
+                setNotifOpen(false)
+            }
+        }
+        document.addEventListener('mousedown', handleClick)
+        return () => document.removeEventListener('mousedown', handleClick)
+    }, [])
+
+    const handleNotifClick = async (notif) => {
+        if (!notif.is_read) {
+            try {
+                await markNotificationRead(notif.id)
+                setNotifications(prev => prev.map(n =>
+                    n.id === notif.id ? { ...n, is_read: true } : n
+                ))
+            } catch { /* non-fatal */ }
+        }
+        setNotifOpen(false)
+        setSection('escalation')
+    }
+
+    const handleMarkAllRead = async () => {
+        try {
+            await markAllNotificationsRead()
+            setNotifications(prev => prev.map(n => ({ ...n, is_read: true })))
+        } catch { /* non-fatal */ }
+    }
 
     const handlePwChange = async (e) => {
         e.preventDefault()
@@ -59,12 +217,35 @@ export default function AdminPortal() {
             <div className="admin-sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
             <header className="admin-mobile-header">
                 <h2>⚙️ Decisio</h2>
-                <button type="button" className="admin-sidebar-toggle" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button type="button" className="admin-sidebar-toggle" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
+                </div>
             </header>
             <aside className="admin-sidebar">
                 <div className="sidebar-header">
                     <h2>⚙️ Decisio</h2>
                     <span className="sidebar-subtitle">Admin Portal</span>
+                    {/* Bell icon — sits below the title in the sidebar header */}
+                    <div ref={notifRef} className="notif-bell-wrapper">
+                        <button
+                            type="button"
+                            className="notif-bell-btn"
+                            onClick={() => setNotifOpen(o => !o)}
+                            aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
+                        >
+                            🔔 Notifications
+                            {unreadCount > 0 && (
+                                <span className="notif-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>
+                            )}
+                        </button>
+                        {notifOpen && (
+                            <NotificationDropdown
+                                notifications={notifications}
+                                onNotifClick={handleNotifClick}
+                                onMarkAll={handleMarkAllRead}
+                            />
+                        )}
+                    </div>
                 </div>
                 <nav className="sidebar-nav">
                     {SECTIONS.map(s => (
@@ -101,6 +282,7 @@ export default function AdminPortal() {
                 {section === 'equipment' && <EquipmentSection />}
                 {section === 'safety' && <SafetySection />}
                 {section === 'escalation' && <EscalationSection />}
+                {section === 'live' && <LiveEscalationsSection />}
                 {section === 'reports' && <ReportsSection />}
             </main>
 
@@ -156,18 +338,23 @@ function DashboardSection() {
     const [loadError, setLoadError] = useState('')
 
     useEffect(() => {
+        let isMounted = true;
         setLoadError('')
         Promise.all([
             getDashboard()
                 .then((data) => {
-                    setStats(data || DEFAULT_STATS)
+                    if (isMounted) setStats(data || DEFAULT_STATS)
                 })
                 .catch((err) => {
-                    setStats(DEFAULT_STATS)
-                    setLoadError(err?.message || 'Failed to load dashboard data')
+                    if (isMounted) {
+                        setStats(DEFAULT_STATS)
+                        setLoadError(err?.message || 'Failed to load dashboard data')
+                    }
                 }),
-            getKpiStats().then(setKpis).catch(() => setKpis(null)),
-        ]).finally(() => setLoading(false))
+            getKpiStats().then(data => { if (isMounted) setKpis(data) }).catch(() => { if (isMounted) setKpis(null) }),
+        ]).finally(() => { if (isMounted) setLoading(false) })
+
+        return () => { isMounted = false; }
     }, [])
 
     if (loading && !stats) return <div className="admin-loading">Loading dashboard...</div>
@@ -363,10 +550,25 @@ function UsersSection() {
 function IncidentsSection() {
     const [incidents, setIncidents] = useState([])
     const [loading, setLoading] = useState(true)
+    const [filterEscalatedOnly, setFilterEscalatedOnly] = useState(false)
+    const [selectedId, setSelectedId] = useState(null)
+    const [detail, setDetail] = useState(null)
+    const [detailLoading, setDetailLoading] = useState(false)
+
+    const loadList = () => {
+        setLoading(true)
+        listIncidents().then(d => setIncidents(d.incidents || [])).catch(console.error).finally(() => setLoading(false))
+    }
+    useEffect(() => { loadList() }, [])
 
     useEffect(() => {
-        listIncidents().then(d => setIncidents(d.incidents || [])).catch(console.error).finally(() => setLoading(false))
-    }, [])
+        if (!selectedId) { setDetail(null); return }
+        setDetailLoading(true)
+        getIncident(selectedId)
+            .then(setDetail)
+            .catch(() => setDetail(null))
+            .finally(() => setDetailLoading(false))
+    }, [selectedId])
 
     const statusColor = (s) => {
         if (s === 'CLOSED') return '#10b981'
@@ -375,18 +577,35 @@ function IncidentsSection() {
         return '#6b7280'
     }
 
+    const filtered = filterEscalatedOnly ? incidents.filter(i => i.status === 'ESCALATED') : incidents
+
     return (
         <div className="admin-section">
-            <h2 className="admin-title">Incidents</h2>
+            <div className="admin-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+                <h2 className="admin-title">Incidents</h2>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-dim)' }}>
+                    <input
+                        type="checkbox"
+                        checked={filterEscalatedOnly}
+                        onChange={e => setFilterEscalatedOnly(e.target.checked)}
+                    />
+                    Escalated only
+                </label>
+            </div>
             {loading ? <div className="admin-loading">Loading...</div> : (
                 <div className="admin-table-wrap">
                     <table className="admin-table">
-                        <thead><tr><th>ID</th><th>Summary</th><th>Asset</th><th>Severity</th><th>Status</th><th>Confidence</th><th>Risk</th></tr></thead>
+                        <thead><tr><th>ID</th><th>Summary</th><th>Asset</th><th>Severity</th><th>Status</th><th>Confidence</th><th>Risk</th><th></th></tr></thead>
                         <tbody>
-                            {incidents.length === 0 ? (
-                                <tr><td colSpan={7} className="td-empty">No incidents yet</td></tr>
-                            ) : incidents.map((inc, i) => (
-                                <tr key={i}>
+                            {filtered.length === 0 ? (
+                                <tr><td colSpan={8} className="td-empty">{filterEscalatedOnly ? 'No escalated incidents' : 'No incidents yet'}</td></tr>
+                            ) : filtered.map((inc, i) => (
+                                <tr
+                                    key={i}
+                                    onClick={() => setSelectedId(inc.incident_id)}
+                                    style={{ cursor: 'pointer' }}
+                                    className={selectedId === inc.incident_id ? 'admin-table-row-selected' : ''}
+                                >
                                     <td className="td-mono">{inc.incident_id?.slice(0, 12)}...</td>
                                     <td>{inc.summary?.slice(0, 50) || '—'}</td>
                                     <td className="td-bold">{inc.asset_id || '—'}</td>
@@ -394,12 +613,119 @@ function IncidentsSection() {
                                     <td><span style={{ color: statusColor(inc.status), fontWeight: 600 }}>{inc.status}</span></td>
                                     <td>{Math.round((inc.confidence || 0) * 100)}%</td>
                                     <td>{inc.risk_score?.toFixed(1) || '—'}</td>
+                                    <td><span style={{ fontSize: 11, color: 'var(--text-dim)' }}>View →</span></td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
             )}
+
+            {selectedId && (
+                <Modal title="Incident details" onClose={() => setSelectedId(null)}>
+                    {detailLoading ? (
+                        <div className="admin-loading">Loading incident...</div>
+                    ) : !detail ? (
+                        <div className="admin-loading">Could not load incident.</div>
+                    ) : (
+                        <IncidentDetailContent detail={detail} onClose={() => setSelectedId(null)} />
+                    )}
+                </Modal>
+            )}
+        </div>
+    )
+}
+
+function IncidentDetailContent({ detail, onClose }) {
+    const card = detail.incident_card || {}
+    const esc = detail.escalation || {}
+    const brief = detail.decision_brief || {}
+    const isEscalated = detail.status === 'ESCALATED' || detail.escalation_triggered
+
+    return (
+        <div style={{ maxHeight: '80vh', overflowY: 'auto' }}>
+            {/* Incident summary */}
+            <div style={{ marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 14, color: 'var(--text-bright)', fontWeight: 600, marginBottom: 8 }}>{card.normalized_summary || '—'}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 24px', fontSize: 12, color: 'var(--text-dim)' }}>
+                    <span><strong>ID:</strong> {detail.incident_id}</span>
+                    <span><strong>Asset:</strong> {card.asset_id || '—'}</span>
+                    <span><strong>Severity:</strong> <span className={`badge badge-${card.severity || 'medium'}`}>{card.severity}</span></span>
+                    <span><strong>Status:</strong> <span style={{ color: isEscalated ? '#ef4444' : '#10b981', fontWeight: 600 }}>{detail.status}</span></span>
+                    <span><strong>Risk:</strong> {detail.risk_score?.toFixed(1) ?? '—'}</span>
+                    <span><strong>Confidence:</strong> {Math.round((detail.confidence || 0) * 100)}%</span>
+                    {detail.failed_attempts > 0 && <span><strong>Failed attempts:</strong> {detail.failed_attempts}</span>}
+                </div>
+            </div>
+
+            {/* Escalation detail — only when escalated */}
+            {isEscalated && (
+                <div style={{
+                    marginBottom: 20, padding: 16, background: 'rgba(239,68,68,0.08)', border: '1px solid #ef4444',
+                    borderRadius: 8,
+                }}>
+                    <h3 style={{ color: '#ef4444', fontSize: 14, fontWeight: 700, marginBottom: 12 }}>🔴 Escalation detail</h3>
+
+                    {detail.escalation_reasons?.length > 0 && (
+                        <div style={{ marginBottom: 12 }}>
+                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>Reasons</div>
+                            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+                                {detail.escalation_reasons.map((r, i) => <li key={i}>{r}</li>)}
+                            </ul>
+                        </div>
+                    )}
+
+                    {(esc.escalation_level != null || esc.escalation_level_name) && (
+                        <div style={{ marginBottom: 8, fontSize: 13 }}>
+                            <strong>Level:</strong> {esc.escalation_level} — {esc.escalation_level_name}
+                        </div>
+                    )}
+                    {esc.escalation_summary && <div style={{ marginBottom: 8, fontSize: 13 }}>{esc.escalation_summary}</div>}
+                    {esc.urgency && <div style={{ marginBottom: 8, fontSize: 12, color: '#f59e0b' }}>Urgency: {esc.urgency}</div>}
+                    {esc.recommended_expertise && <div style={{ marginBottom: 8, fontSize: 12 }}>Recommended expertise: {esc.recommended_expertise}</div>}
+
+                    {esc.what_was_tried?.length > 0 && (
+                        <div style={{ marginTop: 10 }}>
+                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>What was tried</div>
+                            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>{esc.what_was_tried.map((w, i) => <li key={i}>{w}</li>)}</ul>
+                        </div>
+                    )}
+                    {esc.safety_warnings?.length > 0 && (
+                        <div style={{ marginTop: 10 }}>
+                            <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 4 }}>Safety warnings</div>
+                            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>{esc.safety_warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+                        </div>
+                    )}
+
+                    {detail.escalation?.session_id && (
+                        <div style={{ marginTop: 12, padding: 10, background: 'var(--surface)', borderRadius: 6, fontSize: 12 }}>
+                            <strong>💬 Escalation chat</strong> — Session ID: <code style={{ fontSize: 11 }}>{detail.escalation.session_id}</code>
+                            <div style={{ color: 'var(--text-dim)', marginTop: 6 }}>Supervisors can join this conversation from the <strong>Shift Manager Console</strong> (log in as an escalation-level user).</div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Decision brief summary */}
+            {brief.risk_summary && (
+                <div style={{ marginBottom: 16, padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
+                    <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Decision brief</h3>
+                    <div style={{ fontSize: 13, marginBottom: 8 }}>{brief.risk_summary}</div>
+                    {brief.options?.length > 0 && (
+                        <div style={{ fontSize: 12 }}>
+                            <span style={{ color: 'var(--text-dim)' }}>Options: </span>
+                            {brief.options.map((o, i) => <span key={i}>{o.title}{i < brief.options.length - 1 ? '; ' : ''}</span>)}
+                        </div>
+                    )}
+                    {brief.safety_constraints?.length > 0 && (
+                        <div style={{ marginTop: 8, fontSize: 12, color: '#f59e0b' }}>⚠️ {brief.safety_constraints.join(' • ')}</div>
+                    )}
+                </div>
+            )}
+
+            <div style={{ textAlign: 'right' }}>
+                <button type="button" className="admin-btn" onClick={onClose}>Close</button>
+            </div>
         </div>
     )
 }
@@ -806,37 +1132,140 @@ function ReportsSection() {
         <div className="admin-section">
             <h2 className="admin-title">Historical Incident Reports</h2>
             {loading ? <div className="admin-loading">Loading...</div> : (
-                <div className="reports-grid">
+                <div className="reports-grid" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px' }}>
                     {reports.map(r => (
-                        <div key={r.id} className="report-card">
-                            <div className="report-header">
-                                <span className="report-id">{r.id}</span>
-                                <span className={`badge badge-${r.severity}`}>{r.severity}</span>
+                        <div key={r.id} className="report-card" style={{ padding: '20px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface)' }}>
+                            <div style={{ fontWeight: '600', fontSize: '1.2em', marginBottom: '15px', color: 'var(--text-bright)' }}>
+                                Incident ID: {r.id || `IR-2024-${r.id}`}
                             </div>
-                            <h4 className="report-title">{r.title}</h4>
-                            <div className="report-meta">
-                                <span>Asset: <strong>{r.asset_id}</strong></span>
-                                <span>Line: <strong>{r.process_line}</strong></span>
-                                <span>Category: <strong>{r.root_cause_category}</strong></span>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, auto) 1fr', gap: '8px', marginBottom: '15px' }}>
+                                <div style={{ color: 'var(--text-muted)' }}>Date / Time:</div>
+                                <div>{r.created_at ? new Date(r.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(',', ' –') : '—'}</div>
+
+                                <div style={{ color: 'var(--text-muted)' }}>Process Line:</div>
+                                <div>{r.process_line || '—'}</div>
+
+                                <div style={{ color: 'var(--text-muted)' }}>Machine:</div>
+                                <div>{r.asset_id || '—'}</div>
                             </div>
-                            <div className="report-field">
-                                <div className="report-field-label">Root Cause</div>
-                                <div>{r.root_cause}</div>
+
+                            <div style={{ marginBottom: '10px' }}>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Symptom:</div>
+                                <div>{r.symptoms?.join(', ') || r.title || '—'}</div>
                             </div>
-                            <div className="report-field">
-                                <div className="report-field-label">Resolution</div>
-                                <div>{r.resolution}</div>
+
+                            <div style={{ marginBottom: '10px' }}>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Trigger Condition:</div>
+                                <div>{r.trigger_condition || '—'}</div>
                             </div>
-                            <div className="report-times">
-                                <div className="time-compare">
-                                    <span className="time-old">{r.diagnosis_time_traditional}min</span>
-                                    <span className="time-arrow">→</span>
-                                    <span className="time-new">{r.diagnosis_time_structured}min</span>
-                                </div>
-                                <span className="time-label">Traditional → Structured</span>
+
+                            <div style={{ marginBottom: '10px' }}>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Initial Assumption:</div>
+                                <div>{r.initial_assumption || '—'}</div>
+                            </div>
+
+                            <div style={{ marginBottom: '10px' }}>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Root Cause (Confirmed):</div>
+                                <div>{r.root_cause || '—'}</div>
+                            </div>
+
+                            <div style={{ marginBottom: '10px' }}>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Resolution:</div>
+                                <div>{r.resolution || '—'}</div>
+                            </div>
+
+                            <div style={{ marginBottom: '10px' }}>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Diagnosis Time:</div>
+                                <div style={{ paddingLeft: '15px' }}>Traditional approach: ~{r.diagnosis_time_traditional || 45} minutes</div>
+                                <div style={{ paddingLeft: '15px' }}>Structured isolation method: ~{r.diagnosis_time_structured || 18} minutes</div>
+                            </div>
+
+                            <div style={{ marginBottom: '0' }}>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Escalation:</div>
+                                <div>{r.escalation_required ? `Escalated to Level ${r.escalation_level}` : 'No escalation required. Resolved at technician level.'}</div>
                             </div>
                         </div>
                     ))}
+                </div>
+            )}
+        </div>
+    )
+}
+
+// ── Live Escalation Chats (EC6) ────────────────────────────────────
+
+function getWsBase() {
+    const loc = window.location
+    const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${proto}//${loc.host}`
+}
+
+function LiveEscalationsSection() {
+    const [sessions, setSessions] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [activeSession, setActiveSession] = useState(null)
+    const user = getStoredUser()
+
+    const load = () => {
+        setLoading(true)
+        getEscalationSessions()
+            .then(data => setSessions((data.sessions || []).filter(s => s.status !== 'closed')))
+            .catch(console.error)
+            .finally(() => setLoading(false))
+    }
+    useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t) }, [])
+
+    const statusColor = (s) => s === 'waiting' ? '#f59e0b' : s === 'active' ? '#10b981' : '#6b7280'
+
+    if (activeSession) {
+        return (
+            <div className="admin-section">
+                <div className="admin-header-row">
+                    <h2 className="admin-title">💬 Escalation Chat</h2>
+                    <button className="admin-btn" onClick={() => setActiveSession(null)}>← Back to list</button>
+                </div>
+                <div style={{ height: 500, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                    <EscalationChat
+                        sessionId={activeSession.session_id}
+                        companyId={user?.company_id || activeSession.company_id}
+                        userId={user?.id}
+                        userRole={user?.user_type}
+                        userName={user?.full_name || user?.username}
+                    />
+                </div>
+            </div>
+        )
+    }
+
+    return (
+        <div className="admin-section">
+            <div className="admin-header-row">
+                <h2 className="admin-title">Live Escalation Chats</h2>
+                <button className="admin-btn" onClick={load}>↻ Refresh</button>
+            </div>
+            {loading ? <div className="admin-loading">Loading...</div> : sessions.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-dim)' }}>
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>💬</div>
+                    <p>No active escalation chats</p>
+                </div>
+            ) : (
+                <div className="admin-table-wrap">
+                    <table className="admin-table">
+                        <thead><tr><th>Session</th><th>Reporter</th><th>Expert</th><th>Status</th><th>Created</th><th></th></tr></thead>
+                        <tbody>
+                            {sessions.map(s => (
+                                <tr key={s.session_id}>
+                                    <td className="td-mono">{s.session_id?.slice(0, 12)}...</td>
+                                    <td>{s.user_name || `User #${s.user_id}`}</td>
+                                    <td>{s.expert_name || (s.expert_id ? `Expert #${s.expert_id}` : '—')}</td>
+                                    <td><span style={{ color: statusColor(s.status), fontWeight: 600 }}>{s.status === 'waiting' ? '⏳ Waiting' : '🟢 Active'}</span></td>
+                                    <td>{s.created_at ? new Date(s.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                                    <td><button className="admin-btn-sm primary" onClick={() => setActiveSession(s)}>Join Chat</button></td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
             )}
         </div>

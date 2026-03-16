@@ -37,6 +37,7 @@ Rules:
 - Preserve the original meaning; do not add information not in the report.
 - If severity or safety cannot be determined, use "medium" for severity and "unknown" for safety_level.
 - Extract ALL distinct symptoms mentioned.
+- If the report is just a greeting (e.g., "hello", "hi") or lacks any specific issue description, set "normalized_summary" to "New Incident" and leave "asset_id" as null.
 - Return ONLY the JSON object, no markdown fences, no extra text.
 """
 
@@ -56,15 +57,31 @@ def incident_intake_agent(state: DecisioState) -> DecisioState:
     dict
         State update with ``incident_card``, ``status``, and ``current_node``.
     """
-    report = state.get("report", "")
-    if not report:
+    # Original free-text report from the operator
+    report = state.get("report", "") or ""
+    if not report.strip():
         raise ValueError("No incident report provided in state['report'].")
+
+    # Enrich with structured fields from the Problem & Machine Intake agent
+    problem_description = (state.get("problem_description") or "").strip()
+    machine_name = (state.get("machine_name") or "").strip()
 
     llm = get_llm(temperature=0.2)
 
+    # Build a clearer prompt for the LLM, so the second agent always
+    # sees an explicit problem + machine when they are known.
+    enriched_report_lines = ["Incident Report:"]
+    if problem_description:
+        enriched_report_lines.append(f"Problem: {problem_description}")
+    if machine_name:
+        enriched_report_lines.append(f"Machine: {machine_name}")
+    enriched_report_lines.append("")
+    enriched_report_lines.append(report)
+    enriched_report = "\n".join(enriched_report_lines)
+
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=f"Incident Report:\n\n{report}"),
+        HumanMessage(content=enriched_report),
     ]
 
     response = llm.invoke(messages)
@@ -90,11 +107,23 @@ def incident_intake_agent(state: DecisioState) -> DecisioState:
         }
 
     # ── Build the Incident Card ──────────────────────────────────────
+    normalized_summary = extracted.get("normalized_summary", report)
+    # If we have a clearer problem_description from the first agent,
+    # prefer that over the generic fallback summaries.
+    if problem_description and (
+        normalized_summary.lower().startswith("new incident")
+        or len(normalized_summary.split()) < len(problem_description.split())
+    ):
+        normalized_summary = problem_description
+
+    asset_id = extracted.get("asset_id")
+    if (not asset_id) and machine_name:
+        asset_id = machine_name
     card = IncidentCard(
         incident_id=str(uuid.uuid4()),
         report=report,
-        normalized_summary=extracted.get("normalized_summary", report),
-        asset_id=extracted.get("asset_id"),
+        normalized_summary=normalized_summary,
+        asset_id=asset_id,
         symptoms=extracted.get("symptoms", []),
         timestamp=datetime.now(timezone.utc).isoformat(),
         severity=extracted.get("severity", "medium"),

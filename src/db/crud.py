@@ -13,7 +13,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.db.models import Incident, QARecord, OutcomeRecord
+from src.db.models import AdminNotification, Incident, QARecord, OutcomeRecord
 
 
 # ── State ↔ DB conversion ──────────────────────────────────────────
@@ -304,6 +304,7 @@ async def list_incidents(
     session: AsyncSession,
     company_id: int | None = None,
     status_filter: str | None = None,
+    reported_by: str | None = None,
     limit: int = 50,
 ) -> list[dict]:
     """List incidents (summary view), scoped to company."""
@@ -322,8 +323,12 @@ async def list_incidents(
 
     if company_id is not None:
         query = query.where(Incident.company_id == company_id)
+    # Exclude clarification-phase stubs that were saved before intake was complete
+    query = query.where(Incident.status != "CLARIFICATION_NEEDED")
     if status_filter:
         query = query.where(Incident.status == status_filter)
+    if reported_by:
+        query = query.where(Incident.reported_by == reported_by)
 
     result = await session.execute(query)
     rows = result.all()
@@ -342,3 +347,136 @@ async def list_incidents(
         }
         for row in rows
     ]
+
+
+# ── Admin Notifications ────────────────────────────────────────────
+
+
+async def create_admin_notification(
+    session: AsyncSession,
+    company_id: int,
+    notification_type: str,
+    title: str,
+    message: str,
+    incident_id: str | None = None,
+    payload: dict | None = None,
+) -> AdminNotification:
+    """Create an admin notification. Deduplicates: if an unread notification of
+    the same type already exists for this incident, returns the existing one."""
+    if incident_id:
+        existing = await session.scalar(
+            select(AdminNotification).where(
+                AdminNotification.company_id == company_id,
+                AdminNotification.notification_type == notification_type,
+                AdminNotification.incident_id == incident_id,
+                AdminNotification.is_read.is_(False),
+            )
+        )
+        if existing:
+            return existing
+
+    notif = AdminNotification(
+        company_id=company_id,
+        notification_type=notification_type,
+        title=title,
+        message=message,
+        incident_id=incident_id,
+        payload=payload or {},
+    )
+    session.add(notif)
+    await session.flush()
+    return notif
+
+
+async def list_admin_notifications(
+    session: AsyncSession,
+    company_id: int,
+    unread_only: bool = False,
+    limit: int = 50,
+) -> list[dict]:
+    """List admin notifications for a company, newest first."""
+    query = (
+        select(AdminNotification)
+        .where(AdminNotification.company_id == company_id)
+        .order_by(AdminNotification.created_at.desc())
+        .limit(limit)
+    )
+    if unread_only:
+        query = query.where(AdminNotification.is_read.is_(False))
+    rows = (await session.execute(query)).scalars().all()
+    return [_notification_to_dict(n) for n in rows]
+
+
+async def get_unread_notification_count(session: AsyncSession, company_id: int) -> int:
+    """Return the count of unread notifications for a company."""
+    from sqlalchemy import func as sa_func
+    return (await session.scalar(
+        select(sa_func.count()).select_from(AdminNotification).where(
+            AdminNotification.company_id == company_id,
+            AdminNotification.is_read.is_(False),
+        )
+    )) or 0
+
+
+async def mark_notification_read(
+    session: AsyncSession, notification_id: int, company_id: int
+) -> bool:
+    """Mark a single notification as read. Returns False if not found."""
+    from datetime import datetime, timezone as tz
+    notif = await session.scalar(
+        select(AdminNotification).where(
+            AdminNotification.id == notification_id,
+            AdminNotification.company_id == company_id,
+        )
+    )
+    if not notif:
+        return False
+    notif.is_read = True
+    notif.read_at = datetime.now(tz.utc)
+    await session.flush()
+    return True
+
+
+async def mark_all_notifications_read(session: AsyncSession, company_id: int) -> int:
+    """Mark all unread notifications as read. Returns the count updated."""
+    from datetime import datetime, timezone as tz
+    result = await session.execute(
+        update(AdminNotification)
+        .where(
+            AdminNotification.company_id == company_id,
+            AdminNotification.is_read.is_(False),
+        )
+        .values(is_read=True, read_at=datetime.now(tz.utc))
+    )
+    return result.rowcount
+
+
+async def mark_all_notifications_read_for_incident(
+    session: AsyncSession, company_id: int, incident_id: str
+) -> int:
+    """Mark all unread notifications for a specific incident as read."""
+    from datetime import datetime, timezone as tz
+    result = await session.execute(
+        update(AdminNotification)
+        .where(
+            AdminNotification.company_id == company_id,
+            AdminNotification.incident_id == incident_id,
+            AdminNotification.is_read.is_(False),
+        )
+        .values(is_read=True, read_at=datetime.now(tz.utc))
+    )
+    return result.rowcount
+
+
+def _notification_to_dict(n: AdminNotification) -> dict:
+    return {
+        "id": n.id,
+        "notification_type": n.notification_type,
+        "title": n.title,
+        "message": n.message,
+        "incident_id": n.incident_id,
+        "is_read": n.is_read,
+        "created_at": n.created_at.isoformat() if n.created_at else None,
+        "read_at": n.read_at.isoformat() if n.read_at else None,
+        "payload": n.payload or {},
+    }

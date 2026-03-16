@@ -4,22 +4,61 @@ Decisio — LangGraph Workflow (Full Pipeline)
 Wires all agents into a complete workflow with an iterative
 diagnosis loop through the 10-step diagnostic framework.
 
-Flow
-----
-START → incident_intake → screening → retrieval → question_generation → retrieval → END
-  (first response: questions + refreshed patterns)
-  ↓
-  diagnosis_router (loop):
-    → [needs_answer] → wait_for_answer → answer_interpreter
-      → hypothesis_update → safety_constraint → diagnosis_router
-    → [confident_enough] → decision_brief → END
-    → [escalation] → escalation_agent → decision_brief → END
+Intake flow (guided, multi-turn via the API):
+─────────────────────────────────────────────
+  User sends initial message
+      │
+      ▼
+  problem_intake  ── [intake_phase = "symptoms"]
+      │ no symptoms in report
+      │   → clarification_question set → END
+      │   → API sends question to user; user replies; intake_graph re-invoked
+      │ symptoms found
+      ▼
+  problem_intake  ── [intake_phase = "machine"]
+      │   → clarification_question with DB machine list → END
+      │   → API sends question; user replies with machine ID; re-invoked
+      ▼
+  problem_intake  ── [intake_phase = "complete"]
+      │   → validates machine against DB; if invalid → stays in "machine"
+      │   → if valid: clarification_question = None → proceeds below
+      ▼
+  incident_intake  ── builds structured Incident Card
+      │
+      ▼
+  screening  ── severity / safety / risk scoring
+      │ escalation trigger?
+      ├─► escalation ──► decision_brief ──► END
+      │
+      ▼
+  question_generation ──► END
+      (returns first diagnostic question to client)
+
+Answer loop (answer_graph, one turn per user answer):
+──────────────────────────────────────────────────────
+  answer_interpreter → hypothesis_update → safety_constraint
+      → advance_step → diagnosis_router
+          │ continue          │ done / escalate
+          ▼                   ▼
+    question_generation    post_qa_retrieval → decision_brief → END
+          │
+          ▼
+         END  (question returned to client)
+
+Clarification contract:
+───────────────────────
+  When problem_intake_agent sets `clarification_question`, pre_intake_router
+  returns "end" → END.  The FastAPI layer (api.py  /answer endpoint):
+    1. Detects `clarification_question` in state / `screening_complete` is False.
+    2. Appends the user's reply as "[User Clarification]: <answer>" to state["report"].
+    3. Re-invokes intake_graph so problem_intake_agent runs again with the new info.
 """
 
 from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
+from src.agents.problem_intake_agent import problem_intake_agent
 from src.agents.incident_intake_agent import incident_intake_agent
 from src.agents.screening_agent import screening_agent
 from src.agents.retrieval_agent import retrieval_agent
@@ -41,6 +80,31 @@ from src.state.state import (
 
 
 # ── Router functions ─────────────────────────────────────────────────
+
+
+def pre_intake_router(state: DecisioState) -> str:
+    """
+    Route after problem_intake.
+
+    Contract with the API:
+    - If `clarification_question` is present in state, we END the graph run.
+      The FastAPI layer detects this field in the response and sends the
+      clarification question to the user. When the user replies, their
+      answer is appended to `state['report']` and the intake_graph is
+      invoked again (see `/api/incidents/{id}/answer` in `api.py`).
+    - If no clarification is needed, proceed to `incident_intake`.
+    """
+    if state is None:
+        state = {}
+    if state.get("clarification_question"):
+        # We need clarification (problem or machine name is missing).
+        # Returning the special key "end" routes this node to END; the
+        # outer API loop will handle asking the question and re-running
+        # intake_graph after the user answers.
+        return "end"
+    
+    # Otherwise, it's clear enough to build an incident card
+    return "incident_intake"
 
 
 def post_screening_router(state: DecisioState) -> str:
@@ -73,6 +137,7 @@ def diagnosis_router(state: DecisioState) -> str:
     # Check escalation
     if state.get("escalation_triggered"):
         return "escalation"
+
 
     # Check confidence threshold
     confidence = state.get("confidence", 0.0)
@@ -119,12 +184,16 @@ def outcome_router(state: DecisioState) -> str:
 
 
 def advance_diagnostic_step(state: DecisioState) -> DecisioState:
-    """Advance to the next diagnostic step after a Q&A round."""
+    """Advance to the next diagnostic step after a Q&A round if the step is cleared."""
     if state is None:
         state = {}
     current_step = state.get("current_diagnostic_step", 1)
+    step_cleared = state.get("step_cleared", True)
+    
+    next_step = current_step + 1 if step_cleared else current_step
+
     return {
-        "current_diagnostic_step": current_step + 1,
+        "current_diagnostic_step": next_step,
         "should_continue_diagnosis": True,
     }
 
@@ -139,6 +208,7 @@ def build_graph() -> StateGraph:
     graph = StateGraph(DecisioState)
 
     # ── Register all nodes ───────────────────────────────────────────
+    graph.add_node("problem_intake", problem_intake_agent)
     graph.add_node("incident_intake", incident_intake_agent)
     graph.add_node("screening", screening_agent)
     graph.add_node("question_generation", question_agent)
@@ -155,9 +225,19 @@ def build_graph() -> StateGraph:
     graph.add_node("expert_capture", expert_capture_agent)
 
     # ── Entry point ──────────────────────────────────────────────────
-    graph.set_entry_point("incident_intake")
+    # New: first run a lightweight problem/machine intake, then the
+    # existing incident_intake continues to build the Incident Card.
+    graph.set_entry_point("problem_intake")
 
-    # ── Linear flow: intake → screening ──────────────────────────────
+    # ── Linear flow: problem_intake → incident_intake → screening ────
+    graph.add_conditional_edges(
+        "problem_intake",
+        pre_intake_router,
+        {
+            "incident_intake": "incident_intake",
+            "end": END,
+        },
+    )
     graph.add_edge("incident_intake", "screening")
 
     # ── After screening: escalate or continue ────────────────────────

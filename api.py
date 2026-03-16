@@ -8,6 +8,7 @@ Persists all data to PostgreSQL.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 import logging
@@ -19,7 +20,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dotenv import load_dotenv
 
@@ -34,7 +35,8 @@ from src.agents.expert_capture_agent import expert_capture_agent
 
 from src.db.session import init_db, close_db, get_session
 from src.db import crud
-from src.auth import require_auth, require_admin, require_company_admin, require_super_admin, TokenData
+from src.auth import require_auth, require_admin, require_company_admin, require_super_admin, TokenData, is_escalation_type, _LEGACY_ESCALATION_TYPES
+from src.sanitize import sanitize_user_input
 from src.services.escalation_service import EscalationService
 from src.websocket.manager import ws_manager
 from src.websocket.router import router as ws_router
@@ -106,26 +108,28 @@ app.include_router(ws_router, tags=["websocket"])
 
 
 class CreateIncidentRequest(BaseModel):
-    report: str
-    reported_by: str = ""
+    report: str = Field(..., min_length=1, max_length=10_000)
+    reported_by: str = Field(default="", max_length=200)
 
 
 class AnswerRequest(BaseModel):
-    answer: str
+    answer: str = Field(..., min_length=1, max_length=5_000)
 
 
 class OutcomeRequest(BaseModel):
-    outcome: str  # "success" | "failure" | description
+    outcome: str = Field(..., min_length=1, max_length=5_000)
 
 
 class VerificationRequest(BaseModel):
     trigger_normalized: bool
-    verification_notes: str = ""
+    verification_notes: str = Field(default="", max_length=5_000)
 
 
 class IncidentResponse(BaseModel):
     incident_id: str
     status: str
+    report: str = ""
+    qa_history: Optional[list] = None
     incident_card: Optional[dict] = None
     questions: Optional[list] = None
     current_diagnostic_step: Optional[int] = None
@@ -143,16 +147,108 @@ class IncidentResponse(BaseModel):
     memory_written: Optional[bool] = False
     mttd_seconds: Optional[float] = None
     verification_confirmed: Optional[bool] = False
+    clarification_question: Optional[str] = None
+
+
+async def _reprocess_pending_escalations(company_id: int) -> None:
+    """Re-run escalation_agent on every incident that was parked as
+    PENDING_ESCALATION_CONFIG for this company.  Called in the background
+    after an admin saves the first escalation level so parked incidents are
+    immediately re-routed to the correct escalation level.
+    """
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                sa_select(Incident).where(
+                    Incident.company_id == company_id,
+                    Incident.status == "PENDING_ESCALATION_CONFIG",
+                )
+            )
+            pending = result.scalars().all()
+
+        for inc in pending:
+            try:
+                state = crud.incident_to_state(inc)
+                updated = escalation_agent(state)
+                if updated:
+                    state.update(updated)
+                    async with get_session() as session:
+                        await crud.update_incident(session, str(inc.id), state)
+                    # Mark the notification as resolved
+                    async with get_session() as session:
+                        await crud.mark_all_notifications_read_for_incident(
+                            session, company_id, str(inc.id)
+                        )
+            except Exception as inner_err:
+                logger.warning(
+                    "Failed to reprocess pending escalation for incident %s: %s",
+                    inc.id, inner_err,
+                )
+    except Exception as e:
+        logger.warning("_reprocess_pending_escalations failed: %s", e)
 
 
 async def _ensure_escalation_session(state: dict, user: TokenData) -> None:
     """
     When escalation is triggered, create an escalation session, try to assign an expert,
     and add session_id + ws_url to state["escalation"]. Idempotent if already set.
+
+    If the escalation matrix is not yet configured (pending_config), skip the
+    session creation and instead create an admin notification so the admin
+    sees a bell-icon alert and can configure the matrix.
     """
     if not state.get("escalation_triggered") or user.company_id is None:
         return
+
+    # ── No matrix configured: notify admin and return ──────────────
+    escalation_info = state.get("escalation") or {}
+    if escalation_info.get("pending_config"):
+        try:
+            async with get_session() as session:
+                incident_card = state.get("incident_card") or {}
+                incident_id = (
+                    state.get("_session_id")
+                    or incident_card.get("incident_id")
+                    or "unknown"
+                )
+                summary = incident_card.get("normalized_summary") or incident_card.get("symptoms", "")
+                reasons = escalation_info.get("escalation_reasons") or []
+                notif = await crud.create_admin_notification(
+                    session,
+                    company_id=user.company_id,
+                    notification_type="PENDING_ESCALATION_CONFIG",
+                    title="⚠️ Escalation Matrix Not Configured",
+                    message=(
+                        f"Incident '{summary or incident_id}' requires escalation but "
+                        "no escalation matrix has been configured for your company. "
+                        "Please set up escalation levels and rules in "
+                        "Admin Portal → Escalation."
+                    ),
+                    incident_id=incident_id,
+                    payload={
+                        "incident_id": incident_id,
+                        "summary": summary,
+                        "escalation_reasons": reasons,
+                        "reported_by": user.username,
+                    },
+                )
+                try:
+                    await ws_manager.notify_company(
+                        user.company_id,
+                        {
+                            "type": "admin_notification",
+                            "notification": crud._notification_to_dict(notif),
+                        },
+                    )
+                except Exception as ws_err:
+                    logger.warning("Failed to push pending-config notification via WS: %s", ws_err)
+        except Exception as notif_err:
+            logger.warning("Failed to create pending-escalation notification: %s", notif_err)
+        return
+
     if state.get("escalation_session_id"):
+        # This incident already has an escalation session bound to it.
+        # Do not create another one.
         return
     try:
         async with get_session() as session:
@@ -160,24 +256,52 @@ async def _ensure_escalation_session(state: dict, user: TokenData) -> None:
             esc = await svc.create_session(company_id=user.company_id, user_id=user.user_id)
             session_id_val = str(esc.id)
             state["escalation_session_id"] = session_id_val
-            online = ws_manager.get_online_experts(user.company_id)
-            await svc.assign_available_expert(user.company_id, esc.id, online_expert_ids=online or None)
+            if hasattr(ws_manager, 'get_online_experts_async'):
+                try:
+                    online = await ws_manager.get_online_experts_async(user.company_id)
+                except Exception as redis_err:
+                    logger.warning("Redis unavailable for expert lookup, skipping auto-assign: %s", redis_err)
+                    online = None
+            else:
+                online = ws_manager.get_online_experts(user.company_id)
+            try:
+                await svc.assign_available_expert(user.company_id, esc.id, online_expert_ids=online or None)
+            except Exception as assign_err:
+                logger.warning("Expert auto-assignment failed (non-fatal): %s", assign_err)
         state["escalation"] = state.get("escalation") or {}
         state["escalation"]["session_id"] = session_id_val
         state["escalation"]["ws_url"] = f"{WS_BASE_URL}/ws/chat/{user.company_id}/{session_id_val}"
         state["escalation"]["escalation"] = True
+        # Notify all experts in-real time about the new escalation session
+        try:
+            await ws_manager.notify_company(user.company_id, {
+                "type": "new_escalation",
+                "session_id": session_id_val,
+                "company_id": user.company_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass  # Non-critical: experts still have polling fallback
     except Exception as e:
-        logger.warning("Escalation session creation failed: %s", e, exc_info=True)
+        logger.error("Escalation session creation failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create escalation session in database")
 
 
 def _state_to_response(state: dict) -> IncidentResponse:
     """Convert internal state to API response. Guards against None values from graph."""
     if state is None:
         state = {}
-    incident_card = state.get("incident_card") or {}
+        
+    incident_card = state.get("incident_card")
+    inc_id = incident_card.get("incident_id") if incident_card else None
+    if not inc_id:
+        inc_id = state.get("_session_id") or ""
+        
     return IncidentResponse(
-        incident_id=incident_card.get("incident_id", state.get("_session_id") or ""),
+        incident_id=inc_id,
         status=state.get("status") or "UNKNOWN",
+        report=state.get("report") or "",
+        qa_history=state.get("qa_history") or [],
         incident_card=incident_card,
         questions=state.get("questions") or [],
         current_diagnostic_step=state.get("current_diagnostic_step") or 1,
@@ -195,6 +319,7 @@ def _state_to_response(state: dict) -> IncidentResponse:
         memory_written=state.get("memory_written") or False,
         mttd_seconds=state.get("mttd_seconds"),
         verification_confirmed=state.get("verification_confirmed") or False,
+        clarification_question=state.get("clarification_question"),
     )
 
 
@@ -202,15 +327,63 @@ def _state_to_response(state: dict) -> IncidentResponse:
 
 
 async def _save_state(incident_id: str, state: dict):
-    """Save state to PostgreSQL or in-memory fallback."""
-    if use_db():
+    """Save state to PostgreSQL or in-memory fallback.
+
+    During the guided intake phase (no incident_card yet) the incident must not
+    appear in the sidebar or the DB.  We stage it in the in-memory ``sessions``
+    dict only.  Once a real incident_card has been built we persist to
+    PostgreSQL and evict the staging entry so there are no duplicate reads.
+    """
+    has_card = state.get("incident_card") is not None
+
+    if use_db() and has_card:
         async with get_session() as session:
             existing = await crud.get_incident(session, incident_id)
             if existing:
                 await crud.update_incident(session, incident_id, state)
             else:
                 await crud.create_incident(session, state, incident_id)
+
+            # If the incident references a machine that is not in the
+            # equipment registry, raise an admin notification so the
+            # admin can add it. Deduplicated per-incident by CRUD.
+            if state.get("asset_not_registered") and state.get("company_id") is not None:
+                ic = state.get("incident_card") or {}
+                missing_id = state.get("asset_not_registered_id") or ic.get("asset_id") or ""
+                summary = ic.get("normalized_summary") or ic.get("report", "")
+                notif = await crud.create_admin_notification(
+                    session,
+                    company_id=state["company_id"],
+                    notification_type="MACHINE_NOT_REGISTERED",
+                    title="⚠️ Machine not in equipment registry",
+                    message=(
+                        f"Incident '{summary or incident_id}' references machine '{missing_id}', "
+                        "which is not in the equipment registry. Please add this equipment "
+                        "in the Admin Portal → Equipment."
+                    ),
+                    incident_id=incident_id,
+                    payload={
+                        "incident_id": incident_id,
+                        "missing_machine_id": missing_id,
+                        "summary": summary,
+                    },
+                )
+                try:
+                    await ws_manager.notify_company(
+                        state["company_id"],
+                        {
+                            "type": "admin_notification",
+                            "notification": crud._notification_to_dict(notif),
+                        },
+                    )
+                except Exception as ws_err:
+                    logger.warning("Failed to push admin notification via WS: %s", ws_err)
+
+        # Remove from in-memory staging now that it is committed to DB
+        sessions.pop(incident_id, None)
     else:
+        # Either DB is not configured, or the incident_card is not yet set
+        # (clarification phase).  Keep in the in-memory staging store only.
         sessions[incident_id] = state
 
 
@@ -218,13 +391,21 @@ async def _load_state(incident_id: str, company_id: int | None = None) -> dict |
     """Load state from PostgreSQL or in-memory fallback.
     Tenant isolation: when company_id is provided, only returns state if incident belongs
     to that tenant (returns None otherwise → 404). All incident routes pass user.company_id.
+
+    When using PostgreSQL, incidents that are still in the guided intake phase
+    (not yet committed to DB) are held in the in-memory ``sessions`` staging
+    dict.  We check there as a second step if the DB lookup returns nothing.
     """
     if use_db():
         async with get_session() as session:
             inc = await crud.get_incident(session, incident_id, company_id=company_id)
             if inc:
                 return crud.incident_to_state(inc)
-            return None
+        # Not in DB yet — check in-memory staging (clarification / intake phase)
+        state = sessions.get(incident_id)
+        if state and company_id is not None and state.get("company_id") != company_id:
+            return None  # Wrong tenant — treat as not found (404)
+        return state
     else:
         state = sessions.get(incident_id)
         if state and company_id is not None and state.get("company_id") != company_id:
@@ -241,11 +422,11 @@ async def health():
 
 
 def _ensure_chat_access(user: TokenData) -> None:
-    """Only non-admin users can use the chat console."""
-    if user.user_type in ("admin", "super_admin"):
+    """Only viewer role can use the chat console."""
+    if user.user_type != "viewer":
         raise HTTPException(
             status_code=403,
-            detail="Chat console is not available for admin/super_admin accounts. Use the dashboard instead.",
+            detail="Chat console is only available for viewer accounts.",
         )
 
 
@@ -261,8 +442,9 @@ async def create_incident(req: CreateIncidentRequest, user: TokenData = Depends(
     session_id = str(uuid.uuid4())
 
     try:
+        sanitized_report = sanitize_user_input(req.report, max_length=10_000)
         state = intake_graph.invoke({
-            "report": req.report,
+            "report": sanitized_report,
             "company_id": user.company_id,
             "current_diagnostic_step": 1,
             "questions_asked_count": 0,
@@ -288,18 +470,18 @@ async def create_incident(req: CreateIncidentRequest, user: TokenData = Depends(
     if state is None:
         state = {}
 
-    # Set reported_by from request
-    if req.reported_by:
-        ic = state.get("incident_card") or {}
-        ic["reported_by"] = req.reported_by
-        state["incident_card"] = ic
-
     # Ensure company_id is propagated
     state["company_id"] = user.company_id
 
     state["_session_id"] = session_id
-    incident_card = state.get("incident_card") or {}
-    incident_id = incident_card.get("incident_id") or session_id
+    incident_id = session_id
+
+    # Set reported_by and incident_id from user's auth token and session_id
+    ic = state.get("incident_card")
+    if ic is not None:
+        ic["incident_id"] = incident_id
+        ic["reported_by"] = req.reported_by or user.username
+        state["incident_card"] = ic
 
     await _save_state(incident_id, state)
     await _ensure_escalation_session(state, user)
@@ -309,7 +491,6 @@ async def create_incident(req: CreateIncidentRequest, user: TokenData = Depends(
 @app.get("/api/incidents/{incident_id}", response_model=IncidentResponse)
 async def get_incident(incident_id: str, user: TokenData = Depends(require_auth)):
     """Get the current state of an incident (tenant-scoped). Returns 404 if wrong tenant."""
-    _ensure_chat_access(user)
     # super_admin has no company_id; can load any incident by ID
     state = await _load_state(incident_id, company_id=user.company_id if user.company_id is not None else None)
     if not state:
@@ -325,19 +506,44 @@ async def submit_answer(incident_id: str, req: AnswerRequest, user: TokenData = 
     if not state:
         raise HTTPException(404, "Incident not found")
 
+    # Record whether the incident already exists in DB before this call.
+    # We use this later to decide whether to save an individual QA row:
+    # when incident_card was just created in this turn, crud.create_incident
+    # already bulk-saves the full qa_history, so a separate add_qa_record
+    # would be redundant AND would race the INSERT of the parent row.
+    incident_existed_in_db = use_db() and bool(state.get("incident_card"))
+
     questions = state.get("questions") or []
     current_q = (questions[0] if questions else None) or {}
 
-    answer = req.answer.strip()
+    answer = sanitize_user_input(req.answer.strip(), max_length=5000)
     if not answer:
         answer = "I don't know / skipped"
 
     try:
-        state = answer_graph.invoke({
-            **state,
-            "user_answer": answer,
-            "current_question": current_q,
-        })
+        if not state.get("screening_complete") or not state.get("incident_card"):
+            # Still in the guided intake phase (symptoms → machine → complete).
+            # Append the user's reply so problem_intake_agent can read it, then
+            # clear the clarification flag and re-run the intake graph.
+            # intake_phase is preserved in state so the agent advances correctly.
+            state["report"] = state.get("report", "") + f"\n\n[User Clarification]: {answer}"
+            qa_hist = state.get("qa_history") or []
+            qa_hist.append({
+                "question": state.get("clarification_question", ""),
+                "answer": answer,
+                "category": "clarification",
+                "diagnostic_step": 1,
+                "signals": [],
+            })
+            state["qa_history"] = qa_hist
+            state.pop("clarification_question", None)
+            state = intake_graph.invoke(state)
+        else:
+            state = answer_graph.invoke({
+                **state,
+                "user_answer": answer,
+                "current_question": current_q,
+            })
     except Exception as e:
         logger.error(f"Answer processing error: {e}")
         raise HTTPException(500, f"Processing error: {str(e)}")
@@ -345,23 +551,42 @@ async def submit_answer(incident_id: str, req: AnswerRequest, user: TokenData = 
     if state is None:
         state = {}
 
-    # If no brief yet and diagnosis ended, generate one
+    # Ensure reported_by and incident_id are set if incident card was just created
+    ic = state.get("incident_card")
+    if ic is not None:
+        ic["incident_id"] = incident_id
+        if not ic.get("reported_by"):
+            ic["reported_by"] = user.username
+        state["incident_card"] = ic
+
+    # If no brief yet and diagnosis ended, generate one.
+    # We wait longer before generating the brief so the bot can ask
+    # more targeted questions and build higher confidence.
     if not state.get("decision_brief") and (
-        (state.get("confidence") or 0) >= 0.8
-        or (state.get("current_diagnostic_step") or 1) > 10
-        or state.get("escalation_triggered")
+        (state.get("confidence") or 0) >= 0.85
+        or (state.get("current_diagnostic_step") or 1) > 8
+        or (state.get("escalation_triggered") and (state.get("current_diagnostic_step") or 1) > 4)
     ):
         try:
             brief_update = decision_brief_agent(state)
             if brief_update:
                 state.update(brief_update)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Failed to generate decision brief in background: %s", e, exc_info=True)
 
     state["_session_id"] = incident_id
 
-    # Save Q&A record to DB
-    if use_db():
+    # Persist state first so the incident row is guaranteed to exist in the DB
+    # before we try to insert a child QA record.
+    await _save_state(incident_id, state)
+
+    # Save an individual Q&A row only for diagnostic-phase answers (i.e. when
+    # the incident already existed in the DB before this call).  When the
+    # incident_card was just created in this very call, crud.create_incident
+    # already bulk-saved the full qa_history, so a separate row would be a
+    # duplicate.  And during the clarification phase there is no parent row
+    # yet so the FK would be violated.
+    if incident_existed_in_db:
         async with get_session() as session:
             await crud.add_qa_record(
                 session,
@@ -372,7 +597,6 @@ async def submit_answer(incident_id: str, req: AnswerRequest, user: TokenData = 
                 diagnostic_step=(current_q or {}).get("diagnostic_step", 1),
             )
 
-    await _save_state(incident_id, state)
     await _ensure_escalation_session(state, user)
     return _state_to_response(state)
 
@@ -405,7 +629,7 @@ async def submit_outcome(incident_id: str, req: OutcomeRequest, user: TokenData 
     if not state:
         raise HTTPException(404, "Incident not found")
 
-    outcome_text = req.outcome.strip()
+    outcome_text = sanitize_user_input(req.outcome.strip(), max_length=5_000)
     if outcome_text.lower() == "success":
         outcome_notes = "Resolution successful — trigger conditions normalized."
     elif outcome_text.lower() == "failure":
@@ -447,9 +671,11 @@ async def submit_outcome(incident_id: str, req: OutcomeRequest, user: TokenData 
             mem_update = memory_write_agent(state)
             if mem_update:
                 state.update(mem_update)
-        except Exception:
-            pass
-        state["status"] = "CLOSED"
+        except Exception as e:
+            logger.error("Failed to run memory write agent: %s", e, exc_info=True)
+        # Mark as DONE to distinguish successfully completed incidents
+        # from escalated / still-open ones in the UI.
+        state["status"] = "DONE"
 
     elif state.get("escalation_triggered"):
         # Escalate
@@ -457,12 +683,15 @@ async def submit_outcome(incident_id: str, req: OutcomeRequest, user: TokenData 
             esc_update = escalation_agent(state)
             if esc_update:
                 state.update(esc_update)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Failed to update incident outcome in DB: %s", e, exc_info=True)
         state["status"] = "ESCALATED"
 
     await _save_state(incident_id, state)
     await _ensure_escalation_session(state, user)
+    # Re-save after escalation session creation so session_id persists
+    if state.get("escalation_session_id"):
+        await _save_state(incident_id, state)
     return _state_to_response(state)
 
 
@@ -507,7 +736,8 @@ async def verify_resolution(incident_id: str, req: VerificationRequest, user: To
                 state.update(mem_update)
         except Exception:
             pass
-        state["status"] = "CLOSED"
+        # Verified successful resolution → mark as DONE
+        state["status"] = "DONE"
 
     await _save_state(incident_id, state)
     await _ensure_escalation_session(state, user)
@@ -517,15 +747,24 @@ async def verify_resolution(incident_id: str, req: VerificationRequest, user: To
 @app.get("/api/incidents")
 async def list_incidents_endpoint(user: TokenData = Depends(require_auth)):
     """List incidents scoped to the current user's company. Super admin (no company_id) sees all."""
+    # regular viewer users can only see their own incidents
+    reported_by_filter = user.username if user.user_type == "viewer" else None
+
     if use_db():
         async with get_session() as session:
-            return {"incidents": await crud.list_incidents(session, company_id=user.company_id)}
+            return {"incidents": await crud.list_incidents(session, company_id=user.company_id, reported_by=reported_by_filter)}
     else:
         incidents = []
         for iid, state in sessions.items():
             if user.company_id is not None and state.get("company_id") != user.company_id:
                 continue
-            card = state.get("incident_card") or {}
+            card = state.get("incident_card")
+            # Skip clarification-phase sessions that have no incident_card yet
+            if not card:
+                continue
+            if reported_by_filter and card.get("reported_by") != reported_by_filter:
+                continue
+
             incidents.append({
                 "incident_id": iid,
                 "summary": card.get("normalized_summary", ""),
@@ -539,11 +778,11 @@ async def list_incidents_endpoint(user: TokenData = Depends(require_auth)):
 
 # ── Operational Data API endpoints ──────────────────────────────────
 
-from sqlalchemy import select as sa_select, update as sa_update
+from sqlalchemy import select as sa_select, update as sa_update, or_ as sa_or
 from sqlalchemy.exc import IntegrityError
 from src.db.models import (
-    Incident, Equipment, SafetyRule, EscalationLevel, EscalationRule, IncidentReport, Company,
-    EscalationSession, EscalationMessage,
+    AdminNotification, Incident, Equipment, SafetyRule, EscalationLevel, EscalationRule,
+    IncidentReport, Company, EscalationSession, EscalationMessage,
 )
 
 
@@ -673,6 +912,54 @@ async def get_escalation_matrix(user: TokenData = Depends(require_auth)):
         }
 
 
+# ── Admin Notifications ────────────────────────────────────────────
+
+
+@app.get("/api/admin/notifications")
+async def list_notifications(
+    unread_only: bool = False,
+    admin: TokenData = Depends(require_company_admin),
+):
+    """List admin notifications for the current company (newest first)."""
+    async with get_session() as session:
+        return {
+            "notifications": await crud.list_admin_notifications(
+                session,
+                company_id=admin.company_id,
+                unread_only=unread_only,
+            )
+        }
+
+
+@app.get("/api/admin/notifications/count")
+async def get_notification_count(admin: TokenData = Depends(require_company_admin)):
+    """Return the number of unread admin notifications."""
+    async with get_session() as session:
+        count = await crud.get_unread_notification_count(session, admin.company_id)
+    return {"unread_count": count}
+
+
+@app.post("/api/admin/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: int,
+    admin: TokenData = Depends(require_company_admin),
+):
+    """Mark a single notification as read."""
+    async with get_session() as session:
+        ok = await crud.mark_notification_read(session, notification_id, admin.company_id)
+    if not ok:
+        raise HTTPException(404, "Notification not found")
+    return {"message": "Notification marked as read"}
+
+
+@app.post("/api/admin/notifications/read-all")
+async def mark_all_notifications_read(admin: TokenData = Depends(require_company_admin)):
+    """Mark all notifications as read for this company."""
+    async with get_session() as session:
+        count = await crud.mark_all_notifications_read(session, admin.company_id)
+    return {"message": f"{count} notification(s) marked as read"}
+
+
 # ── Escalation Chat (REST) ─────────────────────────────────────────
 
 @app.post("/api/escalation/sessions/{session_id}/close")
@@ -690,11 +977,103 @@ async def close_escalation_session(session_id: uuid.UUID, user: TokenData = Depe
         closed = await svc.close_session(session_id, user.company_id)
     if not closed:
         raise HTTPException(400, "Session already closed")
+    # EC11: broadcast session_closed to notification channel
+    try:
+        await ws_manager.notify_company(user.company_id, {
+            "type": "session_closed",
+            "session_id": str(session_id),
+            "closed_by": user.user_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        logger.warning("Failed to broadcast session_closed event: %s", e, exc_info=True)
     return {"message": "Session closed", "session_id": str(session_id)}
 
 
+@app.get("/api/escalation/experts/available")
+async def check_experts_available(user: TokenData = Depends(require_auth)):
+    """Return whether any active escalation-level accounts exist for this company."""
+    if user.company_id is None:
+        raise HTTPException(403, "Super admin has no company scope.")
+    async with get_session() as session:
+        count = await session.scalar(
+            sa_select(func.count()).select_from(User).where(
+                User.company_id == user.company_id,
+                User.is_active.is_(True),
+                sa_or(
+                    User.user_type.like("L%"),
+                    User.user_type.in_(list(_LEGACY_ESCALATION_TYPES)),
+                ),
+            )
+        ) or 0
+    return {"has_experts": count > 0, "expert_count": count}
+
+
+@app.get("/api/escalation/sessions")
+async def list_escalation_sessions(user: TokenData = Depends(require_auth)):
+    """
+    List escalation sessions for the user's company.
+    - Escalation-level users (L1, L2, ...) see ALL waiting/active sessions so they can join.
+    - Regular users see only their own sessions.
+    - Admins see all sessions.
+    """
+    if user.company_id is None:
+        raise HTTPException(403, "Super admin has no company scope.")
+
+    is_expert = is_escalation_type(user.user_type) or user.user_type == "admin"
+
+    async with get_session() as session:
+        # Load users for display names
+        query = sa_select(EscalationSession).where(
+            EscalationSession.company_id == user.company_id,
+            EscalationSession.status != "closed",
+        ).order_by(EscalationSession.created_at.desc())
+
+        if not is_expert:
+            query = query.where(EscalationSession.user_id == user.user_id)
+
+        result = await session.execute(query)
+        sessions_list = result.scalars().all()
+
+        # Load user display names
+        user_ids = set()
+        for s in sessions_list:
+            user_ids.add(s.user_id)
+            if s.expert_id:
+                user_ids.add(s.expert_id)
+
+        users_map = {}
+        if user_ids:
+            ur = await session.execute(
+                sa_select(User).where(User.id.in_(user_ids))
+            )
+            for u in ur.scalars().all():
+                users_map[u.id] = u.full_name or u.username
+
+        return {
+            "sessions": [
+                {
+                    "session_id": str(s.id),
+                    "status": s.status,
+                    "user_id": s.user_id,
+                    "user_name": users_map.get(s.user_id, f"User #{s.user_id}"),
+                    "expert_id": s.expert_id,
+                    "expert_name": users_map.get(s.expert_id, None) if s.expert_id else None,
+                    "created_at": s.created_at.isoformat() if s.created_at else None,
+                    "ws_url": f"{WS_BASE_URL}/ws/chat/{user.company_id}/{s.id}",
+                }
+                for s in sessions_list
+            ]
+        }
+
+
 @app.get("/api/escalation/sessions/{session_id}/messages")
-async def list_escalation_messages(session_id: uuid.UUID, user: TokenData = Depends(require_auth)):
+async def list_escalation_messages(
+    session_id: uuid.UUID,
+    limit: int = 50,
+    offset: int = 0,
+    user: TokenData = Depends(require_auth)
+):
     """List messages for an escalation session. Participant or admin only."""
     if user.company_id is None:
         raise HTTPException(403, "Super admin has no company scope.")
@@ -703,12 +1082,15 @@ async def list_escalation_messages(session_id: uuid.UUID, user: TokenData = Depe
         esc = await svc.get_session(session_id, user.company_id)
         if not esc:
             raise HTTPException(404, "Session not found")
-        if esc.user_id != user.user_id and esc.expert_id != user.user_id and user.user_type != "admin":
+        # EC10: allow L-type users (escalation handlers) to view messages too
+        if esc.user_id != user.user_id and esc.expert_id != user.user_id and user.user_type != "admin" and not is_escalation_type(user.user_type):
             raise HTTPException(403, "Not a participant")
         result = await session.execute(
             sa_select(EscalationMessage)
             .where(EscalationMessage.session_id == session_id, EscalationMessage.company_id == user.company_id)
             .order_by(EscalationMessage.created_at)
+            .limit(limit)
+            .offset(offset)
         )
         rows = result.scalars().all()
         return {
@@ -746,11 +1128,13 @@ async def list_incident_reports(user: TokenData = Depends(require_auth)):
                     "process_line": r.process_line,
                     "symptoms": r.symptoms,
                     "trigger_condition": r.trigger_condition,
+                    "initial_assumption": r.initial_assumption,
                     "root_cause": r.root_cause,
                     "root_cause_category": r.root_cause_category,
                     "resolution": r.resolution,
                     "turning_point_signal": r.turning_point_signal,
                     "decision_taken": r.decision_taken,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
                     "signals": r.signals,
                     "lessons": r.lessons,
                     "escalation_required": r.escalation_required,
@@ -954,7 +1338,11 @@ class EscalationLevelRequest(BaseModel):
 
 @app.post("/api/admin/escalation-levels")
 async def create_escalation_level(req: EscalationLevelRequest, admin: TokenData = Depends(require_company_admin)):
-    """Create an escalation level (admin only, scoped)."""
+    """Create an escalation level (admin only, scoped).
+
+    After saving, re-runs escalation_agent on any incidents that were parked
+    in PENDING_ESCALATION_CONFIG status, now that a matrix exists.
+    """
     try:
         async with get_session() as session:
             lvl = EscalationLevel(
@@ -963,12 +1351,15 @@ async def create_escalation_level(req: EscalationLevelRequest, admin: TokenData 
             )
             session.add(lvl)
             await session.flush()
-            return {"message": f"Escalation level {lvl.level} created"}
-    except IntegrityError as e:
+    except IntegrityError:
         raise HTTPException(400, f"Escalation level {req.level} already exists for this organization.")
     except Exception as e:
         logger.warning("Create escalation level failed: %s", e, exc_info=True)
         raise HTTPException(500, "Failed to create escalation level. Check that migrations have been applied.")
+
+    # Background: re-process incidents that were waiting for escalation config
+    asyncio.create_task(_reprocess_pending_escalations(admin.company_id))
+    return {"message": f"Escalation level {req.level} created"}
 
 
 @app.put("/api/admin/escalation-levels/{level_id}")
@@ -992,6 +1383,21 @@ async def delete_escalation_level(level_id: int, admin: TokenData = Depends(requ
         lvl = await session.get(EscalationLevel, (admin.company_id, level_id))
         if not lvl:
             raise HTTPException(404, "Escalation level not found")
+        # EC3: prevent deletion if users still have this escalation type
+        user_type_code = f"L{level_id}"
+        assigned_count = await session.scalar(
+            sa_select(func.count()).select_from(User).where(
+                User.company_id == admin.company_id,
+                User.user_type == user_type_code,
+                User.is_active.is_(True),
+            )
+        ) or 0
+        if assigned_count > 0:
+            raise HTTPException(
+                409,
+                f"Cannot delete level L{level_id}: {assigned_count} active user(s) still assigned. "
+                f"Reassign them first.",
+            )
         await session.delete(lvl)
         await session.flush()
         return {"message": f"Escalation level {level_id} deleted"}
@@ -1079,19 +1485,19 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    username: str
-    email: str
-    password: str
-    full_name: str = ""
-    user_type: str = "operator"
+    username: str = Field(..., min_length=2, max_length=100)
+    email: str = Field(..., min_length=5, max_length=255)
+    password: str = Field(..., min_length=8, max_length=128)
+    full_name: str = Field(default="", max_length=200)
+    user_type: str = Field(default="operator", max_length=30)
 
 
 class UpdateUserRequest(BaseModel):
-    email: Optional[str] = None
-    full_name: Optional[str] = None
-    user_type: Optional[str] = None
+    email: Optional[str] = Field(default=None, max_length=255)
+    full_name: Optional[str] = Field(default=None, max_length=200)
+    user_type: Optional[str] = Field(default=None, max_length=30)
     is_active: Optional[bool] = None
-    password: Optional[str] = None
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
 
 def _user_to_dict(u: User) -> dict:
@@ -1822,6 +2228,16 @@ async def create_company(req: CompanyRequest, admin: TokenData = Depends(require
             is_active=True,
         )
         session.add(company)
+        await session.flush()
+
+        # EC2: Auto-create a default L1 escalation level
+        default_level = EscalationLevel(
+            company_id=company.id,
+            level=1,
+            name="Shift Manager",
+            description="Default escalation level for shift managers",
+        )
+        session.add(default_level)
         await session.flush()
 
         return {

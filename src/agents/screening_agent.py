@@ -93,6 +93,12 @@ def screening_agent(state: DecisioState) -> DecisioState:
             context_lines.append(f"  Upstream: {ud['upstream_id']} ({ud['upstream']['name']})")
         if ud.get("downstream"):
             context_lines.append(f"  Downstream: {ud['downstream_id']} ({ud['downstream']['name']})")
+    elif asset_id:
+        # Machine/equipment was named in the incident, but is not in the
+        # equipment registry. Flag this so the API layer can raise an
+        # admin notification (bell icon) and the admin can add it.
+        state["asset_not_registered"] = True
+        state["asset_not_registered_id"] = asset_id
 
     context = "\n".join(context_lines)
 

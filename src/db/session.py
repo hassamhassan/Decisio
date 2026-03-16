@@ -67,10 +67,7 @@ SessionLocal = sessionmaker(
 # ── Lifecycle helpers ───────────────────────────────────────────────
 
 async def init_db():
-    """Create all tables (for development). In production, use Alembic."""
-    from src.db.models import Base
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    pass
 
 
 async def close_db():

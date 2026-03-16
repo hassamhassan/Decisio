@@ -1,5 +1,5 @@
 """Decisio WebSocket layer."""
 
-from src.websocket.manager import WebSocketManager, ws_manager
+from src.websocket.manager import ws_manager
 
-__all__ = ["WebSocketManager", "ws_manager"]
+__all__ = ["ws_manager"]

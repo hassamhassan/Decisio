@@ -18,14 +18,16 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from src.llm import get_llm_for_brief
 from src.state.state import DecisionBrief, DecisionOption, DecisioState
 from src.sanitization import sanitize_decision_brief
+from src.data.escalation_matrix import get_escalation_levels
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
 You are the Decision Brief Agent for Decisio, an operational decision-support system.
 
-Generate a Decision Brief with 2-4 decision options for the operator, based on
-the incident analysis, hypotheses, facts, and safety constraints.
+You are advising on a specific piece of equipment (for example CMP-01) that has
+already gone through a structured diagnostic question flow. Your job is to
+summarise the findings and propose clear, machine-focused decision options.
 
 CRITICAL BOUNDARY: You must NEVER include:
 - Repair steps or procedures
@@ -35,47 +37,64 @@ CRITICAL BOUNDARY: You must NEVER include:
 
 You provide DECISION OPTIONS only — what to decide, not how to execute.
 
-CRITICAL: Do NOT recommend internal machine actions before isolating the trigger
-condition. If only symptom-level hypotheses exist, warn that root cause is not
-isolated and recommend further diagnosis before action.
+FOCUS:
+- Make every option specific to the actual machine/asset in the incident_card
+  (e.g. refer to "CMP-01 air compressor" instead of generic "the equipment").
+- Use the hypotheses and facts to distinguish between HUMAN / TECHNICAL /
+  EXTERNAL causes, but do NOT output generic buckets like "Investigate human
+  error", "Inspect for technical failure", or "Check external factors" as
+  standalone option titles.
+- Each option must describe a concrete decision about HOW TO HANDLE the machine
+  (e.g. "Keep CMP-01 down and schedule expert inspection this shift",
+  "Restart CMP-01 under enhanced monitoring and vibration limits enforced").
+
+SAFETY:
+- Do NOT recommend internal machine actions before isolating the trigger
+  condition. If only symptom-level hypotheses exist, warn that root cause is
+  not isolated and recommend further diagnosis before any restart or change of
+  operating conditions.
+- Always respect active safety_constraints and safety_blocks.
 
 Return a JSON object:
 
-{{
-  "analysis_summary": "Brief 2-3 sentence analysis summary of what was found",
+{
+  "analysis_summary": "Brief 2-3 sentence analysis summary of what was found, explicitly referencing the asset ID/name",
   "root_cause_hypothesis": "Primary root cause hypothesis with confidence level",
   "options": [
-    {{
+    {
       "option_id": 1,
-      "title": "Short title",
-      "description": "What this decision option involves (decision-level, not execution)",
+      "title": "Short, machine-specific title (e.g. 'Keep CMP-01 Down for Expert Inspection')",
+      "description": "Decision-level description of how CMP-01 should be handled (shutdown, restarted with conditions, monitored, etc.)",
       "risks": ["risk1", "risk2"],
       "constraints": ["constraint1"],
       "confidence": 0.0 to 1.0,
       "recommended": true/false,
       "risk_level": "low | medium | medium-high | high",
       "eta": "Estimated time, e.g. '10-15 min'"
-    }}
+    }
   ],
-  "risk_summary": "Overall risk assessment summary",
-  "escalation_guidance": "When/why to escalate if this option doesn't work",
+  "risk_summary": "Overall risk assessment summary, explicitly tied to this asset",
+  "escalation_guidance": "When/why to escalate if this decision does not resolve the issue",
   "requires_escalation": true/false,
-  "decision_authority": "Technician | Shift Engineer | Maintenance Manager | Plant Manager",
-  "escalation_path": "Next escalation level if this decision fails"
-}}
+  "decision_authority": "Role name from the COMPANY ESCALATION MATRIX (if provided)",
+  "escalation_path": "Next escalation level if this decision fails (role name from the COMPANY ESCALATION MATRIX, if provided)"
+}
 
 Rules:
-- Exactly ONE option should have "recommended": true
-- If escalation is already triggered, set requires_escalation to true
-- Include safety constraints in each relevant option
-- Risk descriptions should be specific and actionable
-- decision_authority: for low/medium severity = Technician, high = Shift Engineer, critical = Plant Manager
-- escalation_path: specify the next person/role to escalate to if the decision fails
-- analysis_summary: always fill this with a concise analysis of the situation
-- root_cause_hypothesis: state the primary suspected root cause
-- risk_level: low for safe options, medium for standard, medium-high for options with notable risk, high for dangerous options
-- NOT RECOMMENDED options MUST have risk_level medium-high or high and include explicit risk explanation in risks[]
-- eta: provide realistic time estimate per option
+- Exactly ONE option should have "recommended": true.
+- If escalation is already triggered, set requires_escalation to true.
+- Include safety constraints in each relevant option.
+- Risk descriptions should be specific and actionable and refer to this machine
+  (e.g. "further damage to CMP-01 drive motor if restarted without inspection").
+- decision_authority and escalation_path MUST use specific roles defined in
+  the COMPANY ESCALATION MATRIX, if provided. Do NOT invent generic titles.
+- analysis_summary: always fill this with a concise analysis of the situation.
+- root_cause_hypothesis: state the primary suspected root cause.
+- risk_level: low for safe options, medium for standard, medium-high for options
+  with notable risk, high for dangerous options.
+- NOT RECOMMENDED options MUST have risk_level medium-high or high and include
+  explicit risk explanation in risks[].
+- eta: provide realistic time estimate per option.
 - Return ONLY the JSON object, no markdown fences, no extra text.
 """
 
@@ -98,6 +117,9 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
     qa_history = state.get("qa_history") or []
     retrieved_patterns = state.get("retrieved_patterns") or []
     escalation_triggered = state.get("escalation_triggered", False)
+
+    company_id = state.get("company_id")
+    levels = get_escalation_levels(company_id=company_id)
 
     context_parts = [
         "=== INCIDENT ===",
@@ -136,6 +158,14 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
         context_parts.append("\n=== SIMILAR PAST DECISIONS ===")
         for p in retrieved_patterns:
             context_parts.append(f"- {p.get('title', '')}: {p.get('decision_taken', '')}")
+
+    if levels:
+        context_parts.append("\n=== COMPANY ESCALATION MATRIX ===")
+        # levels is a dict[int, dict] from get_escalation_levels
+        for level_num, info in sorted(levels.items()):
+            context_parts.append(
+                f"- Level {level_num}: {info.get('name', '')}"
+            )
 
     # Warn if only symptom-level hypotheses
     symptom_only = all(h.get("root_cause_layer") == "symptom" for h in hypotheses) if hypotheses else False
@@ -201,7 +231,8 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
                 opt = {**opt, "blocked_by_safety": opt.get("blocked_by_safety", False)}
             o = DecisionOption(**opt)
             validated_options.append(o.model_dump())
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to validate decision option: %s", e, exc_info=True)
             continue
 
     # If safety blocks active and LLM recommended a high-risk option, ensure exactly one recommended
@@ -232,6 +263,28 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
             eta="N/A",
         ).model_dump())
 
+    # Map decision authority and escalation label from DB escalation levels.
+    authority = result.get("decision_authority", "") or ""
+    escalation_label = ""
+    escalation_info = state.get("escalation") or {}
+    current_level = escalation_info.get("escalation_level")
+
+    if levels:
+        level_keys = sorted(levels.keys())
+
+        if escalation_triggered and current_level in levels:
+            # Escalated: use the concrete level chosen by escalation_agent,
+            # and show that SAME level both as authority and escalation label.
+            auth_level = int(current_level)
+            level_name = levels[auth_level].get("name", "") or authority
+            authority = level_name
+            escalation_label = level_name
+        else:
+            # Non-escalated: use lowest level as authority; no escalation label.
+            if level_keys:
+                auth_level = level_keys[0]
+                authority = levels[auth_level].get("name", authority or "")
+
     brief = DecisionBrief(
         incident_id=incident_card.get("incident_id", "unknown"),
         analysis_summary=result.get("analysis_summary", ""),
@@ -242,8 +295,8 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
         safety_constraints=safety_constraints,
         escalation_guidance=result.get("escalation_guidance", ""),
         requires_escalation=escalation_triggered or result.get("requires_escalation", False),
-        decision_authority=result.get("decision_authority", "Technician level"),
-        escalation_path=result.get("escalation_path", ""),
+        decision_authority=authority or "Technician level",
+        escalation_path=escalation_label,
     )
 
     # Calculate MTTD (§27)
@@ -256,8 +309,8 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
             t0 = datetime.fromisoformat(start)
             t1 = datetime.now(timezone.utc)
             mttd = (t1 - t0).total_seconds()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to calculate MTTD: %s", e, exc_info=True)
 
     return {
         "decision_brief": brief.model_dump(),

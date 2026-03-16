@@ -215,8 +215,35 @@ def main():
             continue
 
         # Display initial results
-        print_incident_card(state.get("incident_card", {}))
-        print_patterns(state.get("retrieved_patterns", []))
+        if state.get("screening_complete"):
+            print_incident_card(state.get("incident_card", {}))
+            print_patterns(state.get("retrieved_patterns", []))
+
+        # Check for clarification question
+        while state.get("clarification_question"):
+            print(f"\n  🤖 Clarification Needed: {state['clarification_question']}")
+            answer = input("  📨 Your answer: ").strip()
+
+            if answer.lower() in ("quit", "exit", "q"):
+                print("\n  👋 Goodbye!\n")
+                sys.exit(0)
+
+            print(f"\n  ⏳ Processing clarification...")
+            state["report"] = state.get("report", "") + f"\n\n[User Clarification]: {answer}"
+            qa_hist = state.get("qa_history") or []
+            qa_hist.append({"question": state.get("clarification_question", ""), "answer": answer, "category": "clarification", "diagnostic_step": 1, "signals": []})
+            state["qa_history"] = qa_hist
+            state.pop("clarification_question", None)
+            
+            try:
+                state = intake_graph.invoke(state)
+            except Exception as e:
+                print(f"  ❌ Error processing text: {e}")
+                break
+                
+            if state.get("screening_complete"):
+                print_incident_card(state.get("incident_card", {}))
+                print_patterns(state.get("retrieved_patterns", []))
 
         # Check for immediate escalation
         if state.get("escalation_triggered"):
@@ -255,7 +282,7 @@ def main():
 
             # Process the answer through the sub-graph
             try:
-                print(f"\n  ⏳ Analyzing answer & updating hypotheses...")
+                print(f"\n  ⏳ Analyzing answer...")
                 state = answer_graph.invoke({
                     **state,
                     "user_answer": answer,

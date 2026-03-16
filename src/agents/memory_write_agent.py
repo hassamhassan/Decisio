@@ -123,7 +123,7 @@ def memory_write_agent(state: DecisioState) -> DecisioState:
             stored = True
             logger.info(f"Decision pattern stored: {pattern['title']}")
     except Exception as e:
-        logger.warning(f"Failed to write to Decision Memory: {e}")
+        logger.error("Failed to write to Decision Memory: %s", e, exc_info=True)
 
     return {
         "memory_written": stored,

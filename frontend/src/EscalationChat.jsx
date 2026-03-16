@@ -16,6 +16,7 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
     const [messages, setMessages] = useState([])
     const [input, setInput] = useState('')
     const [status, setStatus] = useState('connecting') // connecting | connected | disconnected | closed
+    const [expertPresent, setExpertPresent] = useState(false) // true once an expert has joined
     const [error, setError] = useState(null)
     const wsRef = useRef(null)
     const chatEndRef = useRef(null)
@@ -23,7 +24,7 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
     const reconnectAttempts = useRef(0)
     const MAX_RECONNECT = 5
 
-    const isExpert = userRole === 'expert' || userRole === 'escalation_owner' || userRole === 'admin'
+    const isExpert = /^L\d+$/.test(userRole) || userRole === 'expert' || userRole === 'escalation_owner' || userRole === 'admin'
 
     // Scroll to bottom when new messages arrive
     useEffect(() => {
@@ -84,13 +85,25 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
                 }
                 if (data.type === 'pong') return
 
+                if (data.type === 'expert_joined') {
+                    setExpertPresent(true)
+                    setMessages(prev => [...prev, {
+                        id: `sys-${Date.now()}`,
+                        senderId: null,
+                        senderRole: 'system',
+                        message: '✅ Shift manager has joined the chat.',
+                        timestamp: data.timestamp,
+                    }])
+                    return
+                }
+
                 if (data.type === 'session_closed') {
                     setStatus('closed')
                     setMessages(prev => [...prev, {
                         id: `sys-${Date.now()}`,
                         senderId: null,
                         senderRole: 'system',
-                        message: 'Session has been closed by the expert.',
+                        message: 'Session has been closed by the shift manager.',
                         timestamp: data.timestamp,
                     }])
                     return
@@ -123,9 +136,14 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
 
         ws.onclose = (e) => {
             wsRef.current = null
-            if (e.code === 4001 || e.code === 4003 || e.code === 4004) {
+            if (e.code === 4001 || e.code === 4003) {
                 setStatus('disconnected')
                 setError(e.reason || 'Access denied')
+                return
+            }
+            if (e.code === 4004) {
+                setStatus('disconnected')
+                setError('This session has already been claimed by another shift manager.')
                 return
             }
             // Auto-reconnect unless session was explicitly closed
@@ -227,9 +245,15 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
 
             {/* Messages */}
             <div className="chat-messages">
-                {messages.length === 0 && status === 'connected' && (
+                {messages.length === 0 && status === 'connected' && !expertPresent && !isExpert && (
+                    <div className="chat-empty" style={{ color: '#f59e0b' }}>
+                        ⏳ Waiting for a shift manager to join…<br />
+                        <span style={{ fontSize: 12, opacity: 0.75 }}>You can type a message and they will see it when they connect.</span>
+                    </div>
+                )}
+                {messages.length === 0 && status === 'connected' && isExpert && (
                     <div className="chat-empty">
-                        No messages yet. Start the conversation with the escalation expert.
+                        You have joined the escalation. Send a message to start helping the operator.
                     </div>
                 )}
 

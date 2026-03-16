@@ -13,8 +13,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: decisio
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,6 +20,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: decisio-redis
+    restart: unless-stopped
 
   qdrant:
     image: qdrant/qdrant:v1.12.0
@@ -48,9 +51,12 @@ services:
       GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
       WS_BASE_URL: ${WS_BASE_URL:-http://localhost:8000}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    command: sh -c "alembic upgrade head && exec uvicorn api:app --host 0.0.0.0 --port 8000"
     depends_on:
       postgres: { condition: service_healthy }
       qdrant: { condition: service_started }
+      redis: { condition: service_started }
     restart: unless-stopped
 
 volumes:

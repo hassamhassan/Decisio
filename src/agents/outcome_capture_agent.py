@@ -133,19 +133,13 @@ def outcome_capture_agent(state: DecisioState) -> DecisioState:
     escalation_reasons = list(state.get("escalation_reasons", []))
 
     if outcome == "failure":
-        failed_attempts += 1
-        # Do not escalate on the first failed attempt – tighten safety and allow retry.
-        # Escalate only after repeated failures or when the model strongly recommends it
-        # on a subsequent attempt.
-        if failed_attempts >= 2 and result.get("escalation_needed"):
-            escalation_triggered = True
-            escalation_reasons.append(
-                f"Decision path failed (attempt #{failed_attempts}): {result.get('why_previous_failed', 'unknown')}"
-            )
-        # Per §9: multiple failures increase caution and should trigger escalation.
-        if failed_attempts >= 3:
-            escalation_triggered = True
-            escalation_reasons.append(f"Multiple failed attempts ({failed_attempts})")
+
+        # Escalate immediately on first failure so the operator can chat with
+        # the shift manager while the system re-diagnoses in parallel.
+        escalation_triggered = True
+        escalation_reasons.append(
+            f"Decision path failed (attempt #{failed_attempts}): {result.get('why_previous_failed', 'unknown') or 'solution did not resolve the issue'}"
+        )
 
     # ── Gap A: Verification Gate (§13) ──────────────────────────────
     # An incident is NOT resolved until trigger conditions normalize,

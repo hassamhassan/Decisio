@@ -313,6 +313,7 @@ class IncidentReport(Base):
     process_line = Column(String(32), default="")
     symptoms = Column(JSONB, default=list)
     trigger_condition = Column(Text, default="")
+    initial_assumption = Column(Text, default="")
     root_cause = Column(Text, default="")
     root_cause_category = Column(String(32), default="")  # downstream/upstream/control/process
     resolution = Column(Text, default="")
@@ -402,4 +403,32 @@ class EscalationMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     session = relationship("EscalationSession", back_populates="messages")
+
+
+# ── Admin Notifications ──────────────────────────────────────────────
+
+
+class AdminNotification(Base):
+    """In-app notifications sent to company admins.
+
+    Currently used for PENDING_ESCALATION_CONFIG alerts: when an incident
+    requires escalation but the admin hasn't configured the escalation
+    matrix yet, a notification is created here so the admin sees a
+    bell-icon alert in the Admin Portal and can act immediately.
+    """
+
+    __tablename__ = "admin_notifications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(
+        Integer, ForeignKey("companies.id"), nullable=False, index=True,
+    )
+    notification_type = Column(String(64), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    incident_id = Column(String(64), nullable=True, index=True)
+    is_read = Column(Boolean, nullable=False, default=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    payload = Column(JSONB, nullable=True)
 

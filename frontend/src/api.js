@@ -331,6 +331,14 @@ export async function superAdminActivateCompany(companyId) {
 
 // ── Escalation Chat API ──────────────────────────────────────────
 
+export async function checkExpertsAvailable() {
+    return apiFetch(`${API_BASE}/escalation/experts/available`);
+}
+
+export async function getEscalationSessions() {
+    return apiFetch(`${API_BASE}/escalation/sessions`);
+}
+
 export async function getEscalationMessages(sessionId) {
     return apiFetch(`${API_BASE}/escalation/sessions/${sessionId}/messages`);
 }
@@ -345,4 +353,22 @@ export function getWsBaseUrl() {
     const loc = window.location;
     const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${loc.host}`;
+}
+
+// ── Admin Notifications API ──────────────────────────────────────
+
+export async function getAdminNotifications(unreadOnly = false) {
+    return apiFetch(`${API_BASE}/admin/notifications${unreadOnly ? '?unread_only=true' : ''}`);
+}
+
+export async function getAdminNotificationCount() {
+    return apiFetch(`${API_BASE}/admin/notifications/count`);
+}
+
+export async function markNotificationRead(notificationId) {
+    return apiFetch(`${API_BASE}/admin/notifications/${notificationId}/read`, { method: 'POST' });
+}
+
+export async function markAllNotificationsRead() {
+    return apiFetch(`${API_BASE}/admin/notifications/read-all`, { method: 'POST' });
 }

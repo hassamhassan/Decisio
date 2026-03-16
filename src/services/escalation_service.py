@@ -24,10 +24,10 @@ from src.db.models import (
 )
 from src.tracing import emit_trace
 
-logger = logging.getLogger(__name__)
+from sqlalchemy import or_ as sa_or
+from src.auth import is_escalation_type, _LEGACY_ESCALATION_TYPES
 
-# Experts are users with this role (and company-scoped)
-EXPERT_USER_TYPES = ("expert", "escalation_owner")
+logger = logging.getLogger(__name__)
 
 
 class EscalationService:
@@ -96,7 +96,10 @@ class EscalationService:
                 sa_select(User.id).where(
                     User.company_id == company_id,
                     User.is_active.is_(True),
-                    User.user_type.in_(EXPERT_USER_TYPES),
+                    sa_or(
+                        User.user_type.like("L%"),
+                        User.user_type.in_(list(_LEGACY_ESCALATION_TYPES)),
+                    ),
                 ).limit(1)
             )
             row = result.scalar_one_or_none()
@@ -118,6 +121,35 @@ class EscalationService:
         })
         logger.info("Expert assigned: session_id=%s expert_id=%s", session_id, expert_id)
         return expert_id
+
+    async def claim_session(
+        self,
+        session_id: uuid.UUID,
+        company_id: int,
+        expert_id: int,
+    ) -> EscalationSession | None:
+        """
+        Let an expert claim an unassigned session (first-come-first-served).
+        If the session already has a different expert_id, do nothing and return as-is.
+        Returns the session if the expert is now the assigned expert, else None.
+        """
+        esc = await self.get_session(session_id, company_id)
+        if not esc:
+            return None
+        if esc.expert_id is None:
+            esc.expert_id = expert_id
+            esc.status = EscalationSessionStatus.ACTIVE
+            await self.session.flush()
+            emit_trace("escalation.expert_claimed", {
+                "session_id": str(session_id),
+                "company_id": company_id,
+                "expert_id": expert_id,
+            })
+            logger.info("Expert claimed session: session_id=%s expert_id=%s", session_id, expert_id)
+        # Allow only the assigned expert to proceed
+        if esc.expert_id != expert_id:
+            return None
+        return esc
 
     async def get_session(
         self,

@@ -239,8 +239,8 @@ class DecisionBrief(BaseModel):
     escalation_guidance: str = Field(default="")
     requires_escalation: bool = Field(default=False)
     decision_authority: str = Field(
-        default="Technician level",
-        description="Who has authority to approve this decision (§19.3)",
+        default="",
+        description="Who has authority to approve this decision (§19.3). Should match a role from the escalation matrix.",
     )
     escalation_path: str = Field(
         default="",
@@ -277,6 +277,19 @@ class DecisioState(TypedDict, total=False):
     report: str  # Free-text incident report from the user
     user_answer: str  # Latest user answer to a diagnostic question
 
+    # Enriched input from Problem & Machine Intake agent
+    problem_description: str  # Clean 1–3 sentence description of the issue
+    machine_name: str  # Machine / asset name or ID, if identified
+    clarification_question: str  # Direct question asked during the problem intake phase
+
+    # Guided intake phase tracking (problem_intake_agent)
+    # Phase lifecycle:  "symptoms" → "machine" → "complete"
+    #   "symptoms"  – first run; agent asks about symptoms
+    #   "machine"   – symptoms collected; agent asks about machine
+    #   "complete"  – both collected; proceed to incident_intake
+    intake_phase: str
+    reported_symptoms: str  # Symptoms described by the user in their own words
+
     # ── Incident Card (structured) ───────────────────────────────────
     incident_card: dict[str, Any]  # Serialised IncidentCard
 
@@ -296,6 +309,7 @@ class DecisioState(TypedDict, total=False):
     facts: list[dict[str, Any]]  # Extracted structured facts (Fact dicts)
     contradictions: list[str]  # Detected contradictions
     current_diagnostic_step: int  # Which of the 10 steps we are on (1-10)
+    step_cleared: bool  # Whether the current diagnostic step has been fully resolved
     questions_asked_count: int  # Total questions asked so far
 
     # ── Hypotheses & Confidence ──────────────────────────────────────

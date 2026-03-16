@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
-import { createIncident, submitAnswer, submitOutcome, generateBrief, logout, getStoredUser } from './api'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { createIncident, submitAnswer, submitOutcome, generateBrief, logout, getStoredUser, listIncidents, getIncident } from './api'
 import EscalationChat from './EscalationChat'
 
 const CATEGORY_LABELS = {
@@ -13,6 +13,7 @@ const CATEGORY_LABELS = {
     process_conditions: 'Process Conditions',
     procedure_human: 'Procedure/Human',
     verification_closure: 'Verification',
+    clarification: 'Clarification',
 }
 
 export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin }) {
@@ -23,10 +24,25 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
     const [incident, setIncident] = useState(null)
     const [escalationSession, setEscalationSession] = useState(null) // { session_id, ws_url }
     const [chatMinimized, setChatMinimized] = useState(false)
+    const [history, setHistory] = useState([])
+    const [showSidebar, setShowSidebar] = useState(user?.user_type === 'viewer')
     const chatRef = useRef(null)
     const inputRef = useRef(null)
 
     const storedUser = getStoredUser()
+
+    const loadHistory = useCallback(async () => {
+        try {
+            const data = await listIncidents()
+            setHistory(data.incidents || [])
+        } catch (e) {
+            console.error("Failed to load history:", e)
+        }
+    }, [])
+
+    useEffect(() => {
+        loadHistory()
+    }, [loadHistory])
 
     useEffect(() => {
         if (chatRef.current) {
@@ -42,6 +58,62 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
     const addMessage = (type, content) => {
         setMessages(prev => [...prev, { id: Date.now() + Math.random(), type, content }])
+    }
+
+    const handleLoadIncident = async (incidentId) => {
+        if (loading) return
+        setLoading(true)
+        try {
+            const data = await getIncident(incidentId)
+            setIncident(data)
+
+            const msgs = []
+            if (data.report) {
+                msgs.push({ id: Math.random(), type: 'user', content: data.report })
+            }
+            if (data.incident_card) {
+                msgs.push({ id: Math.random(), type: 'system', content: { type: 'incident_card', data: data.incident_card } })
+                if (data.retrieved_patterns?.length > 0) {
+                    msgs.push({ id: Math.random(), type: 'system', content: { type: 'patterns', data: data.retrieved_patterns } })
+                }
+            }
+            if (data.qa_history && data.qa_history.length > 0) {
+                data.qa_history.forEach(qa => {
+                    msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: [{ category: qa.category || 'clarification', question: qa.question }] } })
+                    msgs.push({ id: Math.random(), type: 'user', content: qa.answer })
+                })
+            }
+            if (data.decision_brief) {
+                if (data.escalation_triggered) {
+                    msgs.push({ id: Math.random(), type: 'system', content: { type: 'escalation_notice', message: '⏳ This incident requires immediate escalation. Connecting you with a specialist...' } })
+                }
+                if (data.escalation) {
+                    msgs.push({ id: Math.random(), type: 'system', content: { type: 'escalation', data: data.escalation } })
+                }
+                msgs.push({ id: Math.random(), type: 'system', content: { type: 'brief', data: data.decision_brief, escalationTriggered: data.escalation_triggered } })
+            } else if (data.clarification_question) {
+                msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: [{ category: 'clarification', question: data.clarification_question }] } })
+            } else if (data.questions && data.questions.length > 0 && data.status === 'OPEN') {
+                msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: data.questions, step: data.current_diagnostic_step } })
+            }
+            if (data.outcome && data.outcome !== 'pending') {
+                msgs.push({ id: Math.random(), type: 'system', content: { type: 'outcome_result', data } })
+            }
+
+            setMessages(msgs)
+
+            if (data.status === 'CLOSED') setPhase('closed')
+            else if (data.escalation?.session_id) {
+                setEscalationSession(data.escalation)
+                setChatMinimized(false)
+                setPhase('escalation_chat')
+            } else if (data.decision_brief && data.outcome === 'pending') setPhase('outcome')
+            else if (data.clarification_question || (data.questions && data.questions.length > 0)) setPhase('diagnosing')
+            else setPhase('idle')
+        } catch (err) {
+            showError(err, 'Load incident:')
+        }
+        setLoading(false)
     }
 
     /** Show a user-friendly error in chat; log the real error for debugging. */
@@ -78,25 +150,43 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
             try {
                 const data = await createIncident(text)
                 setIncident(data)
+                loadHistory()
 
-                // Show incident card
-                addMessage('system', { type: 'incident_card', data: data.incident_card })
-
-                // Show patterns
-                if (data.retrieved_patterns?.length > 0) {
-                    addMessage('system', { type: 'patterns', data: data.retrieved_patterns })
-                }
-
-                // Show status
-                addMessage('system', { type: 'status', data })
-
-                if (data.escalation_triggered && data.decision_brief) {
-                    addMessage('system', { type: 'escalation', data: data.escalation })
-                    addMessage('system', { type: 'brief', data: data.decision_brief })
-                    setPhase('outcome')
-                } else if (data.questions?.length > 0) {
-                    addMessage('system', { type: 'questions', data: data.questions, step: data.current_diagnostic_step })
+                if (data.clarification_question) {
+                    addMessage('system', { type: 'questions', data: [{ category: 'clarification', question: data.clarification_question }] })
                     setPhase('diagnosing')
+                } else {
+                    // Show incident card
+                    addMessage('system', { type: 'incident_card', data: data.incident_card })
+
+                    // Show patterns
+                    if (data.retrieved_patterns?.length > 0) {
+                        addMessage('system', { type: 'patterns', data: data.retrieved_patterns })
+                    }
+
+                    // Show status
+                    addMessage('system', { type: 'status', data })
+
+                    if (data.escalation_triggered && data.decision_brief) {
+                        addMessage('system', { type: 'escalation_notice', message: '⏳ This incident requires immediate escalation. Connecting you with a specialist...' })
+                        if (data.escalation) {
+                            addMessage('system', { type: 'escalation', data: data.escalation })
+                            if (data.escalation.session_id) {
+                                setEscalationSession(data.escalation)
+                                setChatMinimized(false)
+                                setPhase('escalation_chat')
+                            }
+                        }
+                        addMessage('system', { type: 'escalation_notice', message: '✅ Escalation request sent. An expert will review your incident shortly.' })
+                        addMessage('system', { type: 'brief', data: data.decision_brief, escalationTriggered: true })
+                        if (!data.escalation?.session_id) {
+                            // Fallback: no session yet, stay in outcome so user can still see brief
+                            setPhase('outcome')
+                        }
+                    } else if (data.questions?.length > 0) {
+                        addMessage('system', { type: 'questions', data: data.questions, step: data.current_diagnostic_step })
+                        setPhase('diagnosing')
+                    }
                 }
             } catch (err) {
                 showError(err, 'Create incident:')
@@ -111,30 +201,53 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
             try {
                 const data = await submitAnswer(incident.incident_id, text)
-                setIncident(data)
-
-                addMessage('system', { type: 'status', data })
-
-                if (data.decision_brief) {
-                    addMessage('system', { type: 'brief', data: data.decision_brief })
-                    setPhase('outcome')
-                } else if (data.escalation_triggered) {
-                    // Generate brief if escalation triggered
-                    const briefData = await generateBrief(data.incident_id)
-                    setIncident(briefData)
-                    if (briefData.escalation) {
-                        addMessage('system', { type: 'escalation', data: briefData.escalation })
+                // If card was just generated, show it
+                if (!incident.incident_card && data.incident_card) {
+                    addMessage('system', { type: 'incident_card', data: data.incident_card })
+                    if (data.retrieved_patterns?.length > 0) {
+                        addMessage('system', { type: 'patterns', data: data.retrieved_patterns })
                     }
-                    addMessage('system', { type: 'brief', data: briefData.decision_brief })
-                    setPhase('outcome')
-                } else if (data.questions?.length > 0) {
-                    addMessage('system', { type: 'questions', data: data.questions, step: data.current_diagnostic_step })
+                }
+
+                setIncident(data)
+                loadHistory()
+
+                if (data.clarification_question) {
+                    addMessage('system', { type: 'questions', data: [{ category: 'clarification', question: data.clarification_question }] })
                 } else {
-                    // No more questions, generate brief
-                    const briefData = await generateBrief(data.incident_id)
-                    setIncident(briefData)
-                    addMessage('system', { type: 'brief', data: briefData.decision_brief })
-                    setPhase('outcome')
+                    addMessage('system', { type: 'status', data })
+
+                    if (data.decision_brief) {
+                        addMessage('system', { type: 'brief', data: data.decision_brief })
+                        setPhase('outcome')
+                    } else if (data.escalation_triggered) {
+                        // Generate brief if escalation triggered
+                        addMessage('system', { type: 'escalation_notice', message: '⏳ Based on the diagnosis, this incident needs to be escalated. Please wait...' })
+                        const briefData = await generateBrief(data.incident_id)
+                        setIncident(briefData)
+                        if (briefData.escalation) {
+                            addMessage('system', { type: 'escalation', data: briefData.escalation })
+                            if (briefData.escalation.session_id) {
+                                setEscalationSession(briefData.escalation)
+                                setChatMinimized(false)
+                                setPhase('escalation_chat')
+                            }
+                        }
+                        addMessage('system', { type: 'escalation_notice', message: '✅ Escalation complete. An expert has been notified and will assist with this incident.' })
+                        addMessage('system', { type: 'brief', data: briefData.decision_brief, escalationTriggered: true })
+                        if (!briefData.escalation?.session_id) {
+                            // Fallback: no session yet, stay in outcome so user can still see brief
+                            setPhase('outcome')
+                        }
+                    } else if (data.questions?.length > 0) {
+                        addMessage('system', { type: 'questions', data: data.questions, step: data.current_diagnostic_step })
+                    } else {
+                        // No more questions, generate brief
+                        const briefData = await generateBrief(data.incident_id)
+                        setIncident(briefData)
+                        addMessage('system', { type: 'brief', data: briefData.decision_brief })
+                        setPhase('outcome')
+                    }
                 }
             } catch (err) {
                 showError(err, 'Submit answer:')
@@ -156,17 +269,18 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                 if (data.outcome === 'success') {
                     setPhase('closed')
                 } else if (data.escalation_triggered) {
+                    addMessage('system', { type: 'escalation_notice', message: '⏳ Your issue is being escalated to a specialist. Please wait while we connect you with the right team...' })
                     if (data.escalation) {
                         addMessage('system', { type: 'escalation', data: data.escalation })
                     }
-                    // Open escalation chat instead of closing
+                    addMessage('system', { type: 'escalation_notice', message: '✅ Escalation request sent successfully. An expert has been notified and will review your incident. You will receive further guidance through the escalation channel.' })
+                    // Open escalation chat if session exists
                     if (data.escalation?.session_id) {
                         setEscalationSession(data.escalation)
                         setChatMinimized(false)
                         setPhase('escalation_chat')
-                    } else {
-                        setPhase('closed')
                     }
+                    // If no session, stay in outcome (don't close) so user can retry or start new
                 } else {
                     addMessage('system', { type: 'status', data })
                     // Failure — stay in outcome for retry
@@ -218,14 +332,17 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                         </button>
                     )}
                     <div className="header-user-area">
-                        {/* Chat button — visible to all roles except viewer */}
-                        {user?.user_type !== 'viewer' && escalationSession?.session_id && chatMinimized && (
+                        {/* Live chat button — when escalation session exists, for all roles including viewer */}
+                        {escalationSession?.session_id && (
                             <button
                                 className="btn btn-outline btn-sm"
-                                onClick={() => setChatMinimized(false)}
+                                onClick={() => {
+                                    setChatMinimized(false)
+                                    setPhase('escalation_chat')
+                                }}
                                 style={{ borderColor: '#06b6d4', color: '#06b6d4' }}
                             >
-                                💬 Chat
+                                💬 Live chat with expert
                             </button>
                         )}
                         <span className="header-username">{user?.full_name || user?.username}</span>
@@ -240,85 +357,136 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                 </div>
             </header>
 
-            {/* Chat Area */}
-            <div className="chat-container" ref={chatRef}>
-                {messages.length === 0 && (
-                    <div className="welcome">
-                        <div className="welcome-icon">⚙️</div>
-                        <h2>Decisio</h2>
-                        <p>
-                            Operational Decision Support System.<br />
-                            Describe an incident to begin diagnosis.
-                        </p>
+            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+                {/* Sidebar */}
+                {showSidebar && (
+                    <div className="sidebar" style={{
+                        width: '280px',
+                        borderRight: '1px solid var(--border)',
+                        background: 'var(--bg-card)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflowY: 'auto'
+                    }}>
+                        <div style={{ padding: '16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h3 style={{ margin: 0, fontSize: '14px', color: 'var(--text-bright)' }}>My Incidents</h3>
+                            <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={handleNewIncident}>+ New</button>
+                        </div>
+                        {history.length === 0 && (
+                            <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px' }}>
+                                No past incidents.
+                            </div>
+                        )}
+                        {history.map(inc => (
+                            <div
+                                key={inc.incident_id}
+                                onClick={() => handleLoadIncident(inc.incident_id)}
+                                style={{
+                                    padding: '12px 16px',
+                                    borderBottom: '1px solid var(--border)',
+                                    cursor: 'pointer',
+                                    background: incident?.incident_id === inc.incident_id ? 'var(--bg-hover)' : 'transparent',
+                                }}
+                            >
+                                <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-bright)', marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {inc.summary || 'New Incident'}
+                                </div>
+                                <div style={{ fontSize: '12px', color: 'var(--text-dim)', display: 'flex', justifyContent: 'space-between' }}>
+                                    <span>{inc.status}</span>
+                                    <span>{new Date(inc.created_at).toLocaleDateString()}</span>
+                                </div>
+                                {(inc.risk_score > 0 || inc.confidence > 0) && (
+                                    <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                                        Risk: {inc.risk_score.toFixed(1)} | Conf: {Math.round(inc.confidence * 100)}%
+                                    </div>
+                                )}
+                            </div>
+                        ))}
                     </div>
                 )}
 
-                {messages.map(msg => (
-                    <div key={msg.id} className={`message ${msg.type === 'user' ? 'message-user' : 'message-system'}`}>
-                        {msg.type === 'user' && (
-                            <>
-                                <div className="message-label">You</div>
-                                <div>{msg.content}</div>
-                            </>
+                {/* Main Content Area */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+                    {/* Chat Area */}
+                    <div className="chat-container" ref={chatRef}>
+                        {messages.length === 0 && (
+                            <div className="welcome">
+                                <div className="welcome-icon">⚙️</div>
+                                <h2>Decisio</h2>
+                                <p>
+                                    Operational Decision Support System.<br />
+                                    Describe an incident to begin diagnosis.
+                                </p>
+                            </div>
                         )}
 
-                        {msg.type === 'system' && renderSystemMessage(msg.content, handleOutcomeButton, phase)}
-                    </div>
-                ))}
+                        {messages.map(msg => (
+                            <div key={msg.id} className={`message ${msg.type === 'user' ? 'message-user' : 'message-system'}`}>
+                                {msg.type === 'user' && (
+                                    <>
+                                        <div className="message-label">You</div>
+                                        <div>{msg.content}</div>
+                                    </>
+                                )}
 
-                {loading && (
-                    <div className="message message-system">
-                        <div className="loading">
-                            <div className="loading-dots">
-                                <span></span><span></span><span></span>
+                                {msg.type === 'system' && renderSystemMessage(msg.content, handleOutcomeButton, phase)}
                             </div>
-                            Analyzing...
-                        </div>
+                        ))}
+
+                        {loading && (
+                            <div className="message message-system">
+                                <div className="loading">
+                                    <div className="loading-dots">
+                                        <span></span><span></span><span></span>
+                                    </div>
+                                    Analyzing...
+                                </div>
+                            </div>
+                        )}
                     </div>
-                )}
-            </div>
 
-            {/* Escalation Chat Panel */}
-            {escalationSession?.session_id && user?.user_type !== 'viewer' && (
-                <EscalationChat
-                    sessionId={escalationSession.session_id}
-                    companyId={storedUser?.company_id}
-                    userId={storedUser?.id}
-                    userRole={user?.user_type}
-                    minimized={chatMinimized}
-                    onMinimize={() => setChatMinimized(prev => !prev)}
-                />
-            )}
-
-            {/* Input Area */}
-            {phase !== 'closed' && phase !== 'escalation_chat' && (
-                <div className="input-area">
-                    <form className="input-row" onSubmit={handleSubmit}>
-                        <textarea
-                            ref={inputRef}
-                            className="input-field"
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault()
-                                    handleSubmit(e)
-                                }
-                            }}
-                            placeholder={getPlaceholder()}
-                            disabled={loading}
-                            rows={1}
+                    {/* Escalation Chat Panel (visible for viewer as well once escalation starts) */}
+                    {escalationSession?.session_id && (
+                        <EscalationChat
+                            sessionId={escalationSession.session_id}
+                            companyId={storedUser?.company_id}
+                            userId={storedUser?.id}
+                            userRole={user?.user_type}
+                            minimized={chatMinimized}
+                            onMinimize={() => setChatMinimized(prev => !prev)}
                         />
-                        <button className="btn" type="submit" disabled={loading || !input.trim()}>
-                            Send
-                        </button>
-                    </form>
+                    )}
+
+                    {/* Input Area */}
+                    {phase !== 'closed' && phase !== 'escalation_chat' && (
+                        <div className="input-area">
+                            <form className="input-row" onSubmit={handleSubmit}>
+                                <textarea
+                                    ref={inputRef}
+                                    className="input-field"
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault()
+                                            handleSubmit(e)
+                                        }
+                                    }}
+                                    placeholder={getPlaceholder()}
+                                    disabled={loading}
+                                    rows={1}
+                                />
+                                <button className="btn" type="submit" disabled={loading || !input.trim()}>
+                                    Send
+                                </button>
+                            </form>
+                        </div>
+                    )}
                 </div>
-            )}
+            </div>
         </div>
     )
 }
-
 
 function renderSystemMessage(content, onOutcome, phase) {
     if (typeof content === 'string') {
@@ -333,11 +501,25 @@ function renderSystemMessage(content, onOutcome, phase) {
         case 'status':
             return <StatusBar data={content.data} />
         case 'brief':
-            return <DecisionBrief data={content.data} onOutcome={onOutcome} showOutcome={phase === 'outcome'} />
+            return <DecisionBrief data={content.data} onOutcome={onOutcome} showOutcome={phase === 'outcome'} escalationTriggered={content.escalationTriggered} />
         case 'patterns':
             return <Patterns data={content.data} />
         case 'escalation':
             return <Escalation data={content.data} />
+        case 'escalation_notice':
+            return (
+                <div style={{
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: 'rgba(251, 191, 36, 0.08)',
+                    border: '1px solid rgba(251, 191, 36, 0.2)',
+                    fontSize: '13px',
+                    color: 'var(--warning)',
+                    lineHeight: 1.5
+                }}>
+                    {content.message}
+                </div>
+            )
         case 'outcome_result':
             return <OutcomeResult data={content.data} />
         case 'error':
@@ -395,7 +577,9 @@ function Questions({ data, step }) {
 
     return (
         <>
-            <div className="message-label">Diagnostic Questions — {stepLabel}</div>
+            <div className="message-label">
+                {data.some(q => q.category === 'clarification') ? 'Intake Question' : `Diagnostic Questions — ${stepLabel}`}
+            </div>
             <div className="questions-list">
                 {data.map((q, i) => (
                     <div key={i} className="question-item">
@@ -433,7 +617,7 @@ function StatusBar({ data }) {
 }
 
 
-function DecisionBrief({ data, onOutcome, showOutcome }) {
+function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered }) {
     if (!data) return null
 
     return (
@@ -455,10 +639,10 @@ function DecisionBrief({ data, onOutcome, showOutcome }) {
                 )}
 
                 {data.options?.map((opt, i) => (
-                    <div key={i} className={`option-card ${opt.recommended ? 'recommended' : ''}`}>
+                    <div key={i} className={`option-card ${!escalationTriggered && opt.recommended ? 'recommended' : ''}`}>
                         <div className="option-header">
                             <span className="option-title">{opt.title}</span>
-                            {opt.recommended && <span className="option-badge">Recommended</span>}
+                            {!escalationTriggered && opt.recommended && <span className="option-badge">Recommended</span>}
                         </div>
                         <div className="option-desc">{opt.description}</div>
                         <div className="option-tags">
@@ -511,6 +695,28 @@ function Patterns({ data }) {
 
 function Escalation({ data }) {
     if (!data) return null
+
+    // Edge case: no escalation matrix configured for this company
+    if (data.pending_config) {
+        return (
+            <>
+                <div className="message-label" style={{ color: 'var(--warning)' }}>⏳ Escalation Pending</div>
+                <div className="escalation-box" style={{ borderColor: 'var(--warning)' }}>
+                    <div className="escalation-level" style={{ color: 'var(--warning)' }}>
+                        ⚙️ Escalation Matrix Not Configured
+                    </div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-dim)', marginTop: 6 }}>
+                        {data.escalation_level_description || 'No escalation levels have been set up for your company.'}
+                    </div>
+                    <div style={{ fontSize: '12px', marginTop: '8px', color: 'var(--text-dim)', opacity: 0.8 }}>
+                        Your incident has been flagged for escalation but is waiting until an administrator
+                        configures the escalation matrix in <strong>Admin Portal → Escalation</strong>.
+                    </div>
+                </div>
+            </>
+        )
+    }
+
     return (
         <>
             <div className="message-label" style={{ color: 'var(--danger)' }}>🔴 Escalation</div>
@@ -521,6 +727,16 @@ function Escalation({ data }) {
                 <div style={{ fontSize: '13px', color: 'var(--text-dim)' }}>
                     {data.escalation_summary}
                 </div>
+                {data.decision_authority && (
+                    <div style={{ fontSize: '12px', marginTop: '6px' }}>
+                        Authority: <strong>{data.decision_authority}</strong>
+                    </div>
+                )}
+                {data.escalation_target && (
+                    <div style={{ fontSize: '12px', marginTop: '2px' }}>
+                        Escalation: <strong>{data.escalation_target}</strong>
+                    </div>
+                )}
                 {data.urgency && (
                     <div style={{ fontSize: '12px', marginTop: '6px', color: 'var(--warning)' }}>
                         Urgency: {data.urgency}

@@ -102,7 +102,9 @@ Return a JSON object:
 
 {{
   "escalation_summary": "Brief 2-3 sentence summary of why escalation is needed",
-  "recommended_expertise": "What type of expertise is needed (e.g., mechanical, electrical, process engineering, safety)",
+  "recommended_expertise": "What type of expertise is needed (use the authority/role name from the COMPANY ESCALATION MATRIX if provided)",
+  "decision_authority": "The role name from the escalation matrix who should make the decision (e.g. 'L1 — Field Technician')",
+  "escalation_target": "The next-level role from the escalation matrix to escalate to if unresolved",
   "urgency": "immediate | within_1_hour | within_shift | next_business_day",
   "key_findings": ["list of the most important findings from diagnosis so far"],
   "what_was_tried": ["list of what was attempted and why it failed"],
@@ -115,6 +117,7 @@ Rules:
 - Include ALL relevant context — the expert should NOT need to re-ask basic questions
 - Safety warnings must be prominent and complete
 - Do NOT include repair instructions — only decision context
+- If a COMPANY ESCALATION MATRIX is provided, use ONLY those role names for decision_authority and escalation_target. Do NOT invent roles like "Shift Engineer" or "Maintenance Manager".
 - Return ONLY the JSON object, no markdown fences, no extra text.
 """
 
@@ -143,9 +146,40 @@ def escalation_agent(state: DecisioState) -> DecisioState:
 
     # Determine escalation level from DB (tenant-scoped)
     company_id = state.get("company_id")
-    level = _determine_escalation_level(state)
     levels = get_escalation_levels(company_id=company_id)
-    level_info = levels.get(level, {"name": "No escalation" if level == 0 else f"Level {level}", "description": "Resolved at operator level — no escalation." if level == 0 else "Escalation required"})
+    db_rules = get_escalation_rules(company_id=company_id)
+
+    # ── EDGE CASE: No escalation matrix configured for this company ──
+    # If the admin hasn't set up any escalation levels or rules,
+    # we cannot route the escalation. Park it in a waiting state
+    # until the admin configures the matrix via the Admin Portal.
+    if not levels:
+        logger.warning(
+            "Escalation triggered but company_id=%s has NO escalation levels configured. "
+            "Parking escalation in PENDING_ESCALATION_CONFIG status.",
+            company_id,
+        )
+        return {
+            "escalation_triggered": True,
+            "escalation": {
+                "escalation_level": None,
+                "escalation_level_name": "Pending Configuration",
+                "escalation_level_description": (
+                    "Escalation is required but no escalation matrix has been configured for this company. "
+                    "Please ask your administrator to set up escalation levels and rules in the Admin Portal → Escalation section."
+                ),
+                "pending_config": True,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "incident_id": incident_card.get("incident_id", "unknown"),
+                "escalation_reasons": escalation_reasons,
+                "status": "PENDING_ESCALATION_CONFIG",
+            },
+            "status": "PENDING_ESCALATION_CONFIG",
+            "current_node": "escalation",
+        }
+
+    level = _determine_escalation_level(state)
+    level_info = levels.get(level, {"name": f"Level {level}", "description": "Escalation required"})
 
     # No escalation scenario (level 0): do not create session or handoff
     if level == 0:
@@ -153,8 +187,8 @@ def escalation_agent(state: DecisioState) -> DecisioState:
             "escalation_triggered": False,
             "escalation": {
                 "escalation_level": 0,
-                "escalation_level_name": level_info["name"],
-                "escalation_level_description": level_info["description"],
+                "escalation_level_name": level_info.get("name", "No escalation"),
+                "escalation_level_description": level_info.get("description", "Resolved at operator level — no escalation."),
                 "no_escalation": True,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "incident_id": incident_card.get("incident_id", "unknown"),
@@ -176,6 +210,23 @@ def escalation_agent(state: DecisioState) -> DecisioState:
         f"\nEscalation Level: {level} — {level_info['name']}",
         f"Reason: {level_info['description']}",
     ]
+
+    # ── Inject the FULL company escalation matrix from DB ──
+    if levels:
+        context_parts.append("\n=== COMPANY ESCALATION MATRIX ===")
+        context_parts.append("Use ONLY the following authority/role names. Do NOT invent roles.")
+        for lvl_num in sorted(levels.keys()):
+            lvl_data = levels[lvl_num]
+            context_parts.append(f"  Level {lvl_num}: {lvl_data['name']} — {lvl_data.get('description', '')}")
+
+    db_rules = get_escalation_rules(company_id=company_id)
+    if db_rules:
+        context_parts.append("\n=== ESCALATION RULES ===")
+        for rule in db_rules:
+            context_parts.append(
+                f"  [{rule.get('condition', '')}] confidence {rule.get('confidence_min', 0):.0%}-{rule.get('confidence_max', 1):.0%}, "
+                f"safety={rule.get('safety_impact', 'low')} → Level {rule.get('escalation_level', 0)} ({rule.get('description', '')})"
+            )
 
     # Add asset details from registry (tenant-scoped)
     asset_id = incident_card.get("asset_id", "")
@@ -286,6 +337,8 @@ def escalation_agent(state: DecisioState) -> DecisioState:
         "escalation_reasons": escalation_reasons,
         "escalation_summary": handoff.get("escalation_summary", ""),
         "recommended_expertise": handoff.get("recommended_expertise", ""),
+        "decision_authority": handoff.get("decision_authority", level_info["name"]),
+        "escalation_target": handoff.get("escalation_target", ""),
         "urgency": handoff.get("urgency", "within_1_hour"),
         "key_findings": handoff.get("key_findings", []),
         "what_was_tried": handoff.get("what_was_tried", []),
