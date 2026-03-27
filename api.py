@@ -150,6 +150,14 @@ class IncidentResponse(BaseModel):
     clarification_question: Optional[str] = None
 
 
+async def _safe_background(coro) -> None:
+    """Wrapper for asyncio.create_task — logs unhandled exceptions instead of swallowing them."""
+    try:
+        await coro
+    except Exception:
+        logger.exception("Background task failed")
+
+
 async def _reprocess_pending_escalations(company_id: int) -> None:
     """Re-run escalation_agent on every incident that was parked as
     PENDING_ESCALATION_CONFIG for this company.  Called in the background
@@ -157,6 +165,9 @@ async def _reprocess_pending_escalations(company_id: int) -> None:
     immediately re-routed to the correct escalation level.
     """
     try:
+        from sqlalchemy import select as sa_select
+        from src.db.models import Incident
+
         async with get_session() as session:
             result = await session.execute(
                 sa_select(Incident).where(
@@ -996,8 +1007,9 @@ async def check_experts_available(user: TokenData = Depends(require_auth)):
     if user.company_id is None:
         raise HTTPException(403, "Super admin has no company scope.")
     async with get_session() as session:
+        from sqlalchemy import func as sa_func
         count = await session.scalar(
-            sa_select(func.count()).select_from(User).where(
+            sa_select(sa_func.count()).select_from(User).where(
                 User.company_id == user.company_id,
                 User.is_active.is_(True),
                 sa_or(
@@ -1176,6 +1188,7 @@ async def create_equipment(req: EquipmentRequest, admin: TokenData = Depends(req
             result = await session.execute(
                 sa_select(Equipment)
                 .where(Equipment.id == req.id.upper())
+                .where(Equipment.company_id == admin.company_id)
             )
             if result.scalar_one_or_none():
                 raise HTTPException(409, f"Equipment '{req.id.upper()}' already exists")
@@ -1302,7 +1315,13 @@ class SafetyRuleUpdateRequest(BaseModel):
 async def update_safety_rule(rule_id: int, req: SafetyRuleUpdateRequest, admin: TokenData = Depends(require_company_admin)):
     """Update a safety rule (admin only)."""
     async with get_session() as session:
-        rule = await session.get(SafetyRule, rule_id)
+        result = await session.execute(
+            sa_select(SafetyRule).where(
+                SafetyRule.id == rule_id,
+                SafetyRule.company_id == admin.company_id,
+            )
+        )
+        rule = result.scalar_one_or_none()
         if not rule:
             raise HTTPException(404, "Safety rule not found")
 
@@ -1320,7 +1339,13 @@ async def update_safety_rule(rule_id: int, req: SafetyRuleUpdateRequest, admin: 
 async def delete_safety_rule(rule_id: int, admin: TokenData = Depends(require_company_admin)):
     """Delete a safety rule (admin only)."""
     async with get_session() as session:
-        rule = await session.get(SafetyRule, rule_id)
+        result = await session.execute(
+            sa_select(SafetyRule).where(
+                SafetyRule.id == rule_id,
+                SafetyRule.company_id == admin.company_id,
+            )
+        )
+        rule = result.scalar_one_or_none()
         if not rule:
             raise HTTPException(404, "Safety rule not found")
         await session.delete(rule)
@@ -1358,7 +1383,7 @@ async def create_escalation_level(req: EscalationLevelRequest, admin: TokenData 
         raise HTTPException(500, "Failed to create escalation level. Check that migrations have been applied.")
 
     # Background: re-process incidents that were waiting for escalation config
-    asyncio.create_task(_reprocess_pending_escalations(admin.company_id))
+    asyncio.create_task(_safe_background(_reprocess_pending_escalations(admin.company_id)))
     return {"message": f"Escalation level {req.level} created"}
 
 
@@ -1528,24 +1553,24 @@ async def login(req: LoginRequest):
         )
         user = result.scalar_one_or_none()
 
-    if not user or not verify_password(req.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        if not user or not verify_password(req.password, user.hashed_password):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="Account is deactivated")
+        if not user.is_active:
+            raise HTTPException(status_code=403, detail="Account is deactivated")
 
-    token = create_access_token({
-        "user_id": user.id,
-        "username": user.username,
-        "user_type": user.user_type,
-        "company_id": user.company_id,
-    })
+        token = create_access_token({
+            "user_id": user.id,
+            "username": user.username,
+            "user_type": user.user_type,
+            "company_id": user.company_id,
+        })
 
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "user": _user_to_dict(user),
-    }
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "user": _user_to_dict(user),
+        }
 
 
 @app.post("/api/auth/register")
@@ -1642,7 +1667,7 @@ async def create_user(req: RegisterRequest, admin: TokenData = Depends(require_c
                 (User.username == req.username) | (User.email == req.email)
             )
         )
-        if existing.scalar_one_or_none():
+        if existing.first():
             raise HTTPException(409, "Username or email already exists")
 
         user = User(
@@ -1794,7 +1819,7 @@ async def admin_dashboard(admin: TokenData = Depends(require_company_admin)):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str
+    new_password: str = Field(..., min_length=8, max_length=128)
 
 
 @app.put("/api/auth/change-password")
@@ -1902,7 +1927,7 @@ class CreateCompanyAdminRequest(BaseModel):
     """Request body for creating a company admin (super_admin only)."""
     username: str
     email: str
-    password: str
+    password: str = Field(..., min_length=8, max_length=128)
     full_name: str = ""
 
 
@@ -1967,7 +1992,7 @@ async def super_admin_create_company(req: CompanyRequest, super_admin: TokenData
                 (Company.name == req.name) | (Company.slug == req.slug)
             )
         )
-        if existing.scalar_one_or_none():
+        if existing.first():
             raise HTTPException(409, "Company name or slug already exists")
 
         company = Company(
@@ -2021,7 +2046,7 @@ class UpdateCompanyAdminRequest(BaseModel):
     company_id: Optional[int] = None
     email: Optional[str] = None
     full_name: Optional[str] = None
-    password: Optional[str] = None
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
 
 @app.put("/api/super-admin/admins/{user_id}")
@@ -2059,7 +2084,7 @@ async def super_admin_update_admin(
             target.email = req.email.strip()
         if req.full_name is not None:
             target.full_name = req.full_name.strip()
-        if req.password is not None and req.password.strip():
+        if req.password is not None:
             target.hashed_password = hash_password(req.password)
         await session.flush()
         return {"user": _user_to_dict(target), "message": "Admin updated successfully"}
@@ -2089,7 +2114,7 @@ async def super_admin_create_company_admin(
                 (User.username == req.username) | (User.email == req.email)
             )
         )
-        if existing.scalar_one_or_none():
+        if existing.first():
             raise HTTPException(409, "Username or email already exists")
 
         user = User(
@@ -2219,7 +2244,7 @@ async def create_company(req: CompanyRequest, admin: TokenData = Depends(require
                 (Company.name == req.name) | (Company.slug == req.slug)
             )
         )
-        if existing.scalar_one_or_none():
+        if existing.first():
             raise HTTPException(409, "Company name or slug already exists")
 
         company = Company(

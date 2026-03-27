@@ -191,10 +191,9 @@ class RedisWebSocketManager:
         # Since we must return a set immediately, we use a small asyncio loop or return empty sets
         # if the loop is already running. However, FastApi handles this by letting us run async down the stack if needed.
         # Actually, get_online_experts is called directly as sync in `api.py`.
-        # To avoid blocking the event loop or causing 'loop already running' errors, we will just return empty set for now,
-        # and we must FIX `api.py` to `await ws_manager.get_online_experts(cid)`
-        # I'll return a stub here and fix api.py next.
-        pass
+        # To avoid blocking the event loop or causing 'loop already running' errors,
+        # return empty set for now. api.py already uses get_online_experts_async when available.
+        return set()
 
     async def get_online_experts_async(self, company_id: int) -> set[int]:
         key = f"experts_online:{company_id}"
@@ -231,19 +230,15 @@ class RedisWebSocketManager:
 
 # Singleton resolution
 if REDIS_URL:
-    logger.info("Initializing RedisWebSocketManager")
-    ws_manager = RedisWebSocketManager(REDIS_URL)
+    try:
+        logger.info("Initializing RedisWebSocketManager")
+        ws_manager = RedisWebSocketManager(REDIS_URL)
+    except Exception as _redis_err:
+        logger.warning(
+            "Redis connection failed (%s), falling back to InMemoryWebSocketManager",
+            _redis_err,
+        )
+        ws_manager = InMemoryWebSocketManager()
 else:
     logger.warning("Initializing InMemoryWebSocketManager (NOT SCALABLE FOR PRODUCTION WORKERS)")
     ws_manager = InMemoryWebSocketManager()
-
-# Add a compat wrapper for the sync get_online_experts issue
-def _sync_get_experts(company_id: int) -> set[int]:
-    if isinstance(ws_manager, InMemoryWebSocketManager):
-        return ws_manager.get_online_experts(company_id)
-    else:
-        # Cannot run async inside sync endpoint reliably without breaking uvicorn loops.
-        # We must change api.py to await this.
-        return set()
-
-ws_manager.get_online_experts = getattr(ws_manager, 'get_online_experts', _sync_get_experts)

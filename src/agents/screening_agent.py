@@ -93,12 +93,15 @@ def screening_agent(state: DecisioState) -> DecisioState:
             context_lines.append(f"  Upstream: {ud['upstream_id']} ({ud['upstream']['name']})")
         if ud.get("downstream"):
             context_lines.append(f"  Downstream: {ud['downstream_id']} ({ud['downstream']['name']})")
-    elif asset_id:
+    # Track unregistered asset (returned via output dict, never mutate input state)
+    asset_not_registered = False
+    asset_not_registered_id = None
+    if not asset_info and asset_id:
         # Machine/equipment was named in the incident, but is not in the
         # equipment registry. Flag this so the API layer can raise an
         # admin notification (bell icon) and the admin can add it.
-        state["asset_not_registered"] = True
-        state["asset_not_registered_id"] = asset_id
+        asset_not_registered = True
+        asset_not_registered_id = asset_id
 
     context = "\n".join(context_lines)
 
@@ -153,7 +156,7 @@ def screening_agent(state: DecisioState) -> DecisioState:
     if escalation_reasons:
         escalation_triggered = True
 
-    return {
+    result_dict = {
         "incident_card": updated_card,
         "risk_score": risk_score,
         "screening_complete": True,
@@ -164,3 +167,7 @@ def screening_agent(state: DecisioState) -> DecisioState:
         "status": "DIAGNOSIS_LOOP",
         "current_node": "screening",
     }
+    if asset_not_registered:
+        result_dict["asset_not_registered"] = True
+        result_dict["asset_not_registered_id"] = asset_not_registered_id
+    return result_dict

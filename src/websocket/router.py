@@ -217,6 +217,12 @@ async def escalation_chat(websocket: WebSocket, company_id: int, session_id: str
     except Exception as e:
         logger.warning("Escalation WS error: %s", e, exc_info=True)
     finally:
+        # Cancel dangling tasks to prevent InvalidState errors and task leaks
+        if heartbeat_task and not heartbeat_task.done():
+            heartbeat_task.cancel()
+        if receive_task and not receive_task.done():
+            receive_task.cancel()
+
         await ws_manager.disconnect(
             company_id=company_id,
             session_id=session_id,

@@ -29,6 +29,9 @@ def emit_trace(event: str, payload: dict[str, Any] | None = None) -> None:
         **payload,
     }
     _trace_events.append(record)
+    # Prevent unbounded memory growth in production
+    if len(_trace_events) > 1000:
+        _trace_events[:] = _trace_events[-500:]
     logger.info("trace: %s %s", event, payload)
 
 

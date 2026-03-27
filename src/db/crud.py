@@ -244,6 +244,23 @@ async def update_incident(session: AsyncSession, incident_id: str, state: dict) 
     inc.diagnosis_end_time = state.get("diagnosis_end_time", inc.diagnosis_end_time)
     inc.mttd_seconds = state.get("mttd_seconds", inc.mttd_seconds)
 
+    # Bug 18 Fix: Sync new QARecord elements to the db to prevent erasure on reload
+    from sqlalchemy import func
+    existing_count = await session.scalar(
+        select(func.count()).select_from(QARecord).where(QARecord.incident_id == incident_id)
+    ) or 0
+    new_qa = state.get("qa_history", [])
+    if len(new_qa) > existing_count:
+        for qa in new_qa[existing_count:]:
+            session.add(QARecord(
+                incident_id=incident_id,
+                question=qa.get("question", ""),
+                answer=qa.get("answer", ""),
+                category=qa.get("category", "general"),
+                diagnostic_step=qa.get("diagnostic_step", 1),
+                signals=qa.get("signals", []),
+            ))
+
     await session.flush()
     return inc
 

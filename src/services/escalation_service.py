@@ -102,9 +102,9 @@ class EscalationService:
                     ),
                 ).limit(1)
             )
-            row = result.scalar_one_or_none()
-            if row:
-                candidate_ids = [row[0]]
+            expert_id_val = result.scalar_one_or_none()
+            if expert_id_val is not None:
+                candidate_ids = [expert_id_val]
 
         if not candidate_ids:
             logger.info("No available expert for company_id=%s", company_id)
