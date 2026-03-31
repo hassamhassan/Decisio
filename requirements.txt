@@ -13,3 +13,7 @@ alembic>=1.13.0
 bcrypt>=4.0.0
 python-jose[cryptography]>=3.3.0
 redis>=5.0.0
+# Decision Memory (vector retrieval) — optional; set DECISIO_DISABLE_RETRIEVAL=1 to skip
+qdrant-client>=1.7.0
+# Gemini embeddings (hosted) — avoids local torch/sentence-transformers
+google-genai>=0.7.0

@@ -153,8 +153,11 @@ def safety_constraint_agent(state: DecisioState) -> DecisioState:
     ]
     if mandatory_escalation_patterns:
         context_parts.append("\n=== MANDATORY ESCALATION PATTERNS ===")
-        for p in mandatory_escalation_patterns:
-            context_parts.append(f"- {p.get('title', 'unknown')}")
+        for p in mandatory_escalation_patterns[:6]:
+            title = str(p.get("title", "unknown"))[:200]
+            context_parts.append(f"- {title}")
+        if len(mandatory_escalation_patterns) > 6:
+            context_parts.append(f"- … and {len(mandatory_escalation_patterns) - 6} more")
 
     context = "\n".join(context_parts)
 

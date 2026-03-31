@@ -28,7 +28,7 @@ Intake flow (guided, multi-turn via the API):
       ▼
   screening  ── severity / safety / risk scoring
       │ escalation trigger?
-      ├─► escalation ──► decision_brief ──► END
+      ├─► escalation ──► END
       │
       ▼
   question_generation ──► END
@@ -108,22 +108,15 @@ def pre_intake_router(state: DecisioState) -> str:
 
 
 def post_screening_router(state: DecisioState) -> str:
-    """Route after screening: escalate immediately or continue."""
+    """Route after screening: escalate or first diagnostic question.
+
+    Decision Memory (vector) retrieval runs later — after Q&A — via
+    ``post_qa_retrieval``, only when routing to the decision brief.
+    """
     if state is None:
         state = {}
     if state.get("escalation_triggered"):
         return "escalation"
-    # Go directly into question generation; retrieval is only used
-    # later, just before generating the Decision Brief.
-    return "question_generation"
-
-
-def post_retrieval_router(state: DecisioState) -> str:
-    """After retrieval: if we already have questions, return to client (END); else generate questions."""
-    if state is None:
-        state = {}
-    if state.get("questions"):
-        return "end"
     return "question_generation"
 
 
@@ -217,7 +210,7 @@ def build_graph() -> StateGraph:
     graph.add_node("safety_constraint", safety_constraint_agent)
     graph.add_node("advance_step", advance_diagnostic_step)
     graph.add_node("decision_brief", decision_brief_agent)
-    # Run an additional retrieval pass after questioning (before final brief)
+    # Retrieval once Q&A context exists, immediately before decision brief
     graph.add_node("post_qa_retrieval", retrieval_agent)
     graph.add_node("escalation", escalation_agent)
     graph.add_node("outcome_capture", outcome_capture_agent)
@@ -245,8 +238,6 @@ def build_graph() -> StateGraph:
         "screening",
         post_screening_router,
         {
-            # post_screening_router now routes directly to question_generation;
-            # retrieval is only used later before decision brief.
             "question_generation": "question_generation",
             "escalation": "escalation",
         },
@@ -273,8 +264,8 @@ def build_graph() -> StateGraph:
         },
     )
 
-    # ── Escalation → decision brief ──────────────────────────────────
-    graph.add_edge("escalation", "decision_brief")
+    # ── Escalation ends the flow immediately
+    graph.add_edge("escalation", END)
 
     # ── Post-questioning retrieval → decision brief → END ───────────
     graph.add_edge("post_qa_retrieval", "decision_brief")
@@ -305,10 +296,10 @@ def build_answer_graph() -> StateGraph:
     """
     Build a sub-graph for processing a single answer.
 
-    Flow: answer_interpreter → hypothesis_update → safety_constraint
-          → advance_step → (question_generation → retrieval → END
+        Flow: answer_interpreter → hypothesis_update → safety_constraint
+          → advance_step → (question_generation → END
                              | post_qa_retrieval → decision_brief → END
-                             | escalation → decision_brief → END)
+                             | escalation → END)
     """
     graph = StateGraph(DecisioState)
 
@@ -338,7 +329,7 @@ def build_answer_graph() -> StateGraph:
         },
     )
 
-    graph.add_edge("escalation", "decision_brief")
+    graph.add_edge("escalation", END)
     # For the answer subgraph, question_generation directly returns
     # questions to the client; retrieval is only used just before
     # the final decision brief.
@@ -365,6 +356,7 @@ def build_outcome_graph() -> StateGraph:
     graph.add_node("memory_write", memory_write_agent)
     graph.add_node("expert_capture", expert_capture_agent)
     graph.add_node("escalation", escalation_agent)
+    graph.add_node("post_qa_retrieval", retrieval_agent)
     graph.add_node("decision_brief", decision_brief_agent)
 
     graph.set_entry_point("outcome_capture")
@@ -380,8 +372,7 @@ def build_outcome_graph() -> StateGraph:
     )
 
     graph.add_edge("memory_write", END)
-    graph.add_edge("escalation", "decision_brief")
-    graph.add_edge("decision_brief", END)
+    graph.add_edge("escalation", END)
 
     return graph.compile()
 

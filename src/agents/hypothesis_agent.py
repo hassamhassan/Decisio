@@ -14,6 +14,13 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.llm import get_llm
 from src.state.state import DecisioState, Hypothesis
+from src.agents.prompt_context import (
+    format_qa_history_for_llm,
+    format_retrieved_patterns_for_llm,
+)
+
+HYPOTHESIS_QA_PROMPT_WINDOW = 6
+HYPOTHESIS_PATTERN_PROMPT_CAP = 4
 
 SYSTEM_PROMPT = """\
 You are the Hypothesis Update Agent for Decisio, an operational decision-support system.
@@ -113,17 +120,22 @@ def hypothesis_update_agent(state: DecisioState) -> DecisioState:
         for f in facts:
             context_parts.append(f"- {f.get('key', '?')}: {f.get('value', '?')} (confidence: {f.get('confidence', 0)})")
 
-    if qa_history:
-        context_parts.append(f"\n=== Q&A HISTORY ({len(qa_history)} pairs) ===")
-        for qa in qa_history[-5:]:  # Last 5 for context window
-            context_parts.append(f"Q: {qa.get('question', '')}\nA: {qa.get('answer', '')}")
+    qa_block = format_qa_history_for_llm(
+        qa_history,
+        max_exchanges=HYPOTHESIS_QA_PROMPT_WINDOW,
+        heading=f"Q&A HISTORY ({len(qa_history)} total)",
+        mode="plain",
+    )
+    if qa_block:
+        context_parts.append("\n" + qa_block)
 
-    if retrieved_patterns:
-        context_parts.append("\n=== SIMILAR PAST INCIDENTS ===")
-        for p in retrieved_patterns:
-            context_parts.append(
-                f"- {p.get('title', '')} (similarity: {p.get('similarity_score', 0):.0%}) → {p.get('decision_taken', '')}"
-            )
+    pat_block = format_retrieved_patterns_for_llm(
+        retrieved_patterns,
+        max_patterns=HYPOTHESIS_PATTERN_PROMPT_CAP,
+        heading="SIMILAR PAST INCIDENTS",
+    )
+    if pat_block:
+        context_parts.append("\n" + pat_block)
 
     if existing_hypotheses:
         context_parts.append("\n=== CURRENT HYPOTHESES ===")

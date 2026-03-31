@@ -19,6 +19,9 @@ from src.llm import get_llm_for_brief
 from src.state.state import DecisionBrief, DecisionOption, DecisioState
 from src.sanitization import sanitize_decision_brief
 from src.data.escalation_matrix import get_escalation_levels
+from src.agents.prompt_context import format_retrieved_patterns_for_llm
+
+DECISION_BRIEF_PATTERN_PROMPT_CAP = 4
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,7 @@ Return a JSON object:
 }
 
 Rules:
+- You MUST provide exactly 3 decision options, covering different approaches (e.g. conservative, moderate, aggressive).
 - Exactly ONE option should have "recommended": true.
 - If escalation is already triggered, set requires_escalation to true.
 - Include safety constraints in each relevant option.
@@ -154,10 +158,13 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
         for b in safety_blocks:
             context_parts.append(f"- ⛔ {b}")
 
-    if retrieved_patterns:
-        context_parts.append("\n=== SIMILAR PAST DECISIONS ===")
-        for p in retrieved_patterns:
-            context_parts.append(f"- {p.get('title', '')}: {p.get('decision_taken', '')}")
+    pat_block = format_retrieved_patterns_for_llm(
+        retrieved_patterns,
+        max_patterns=DECISION_BRIEF_PATTERN_PROMPT_CAP,
+        heading="SIMILAR PAST DECISIONS",
+    )
+    if pat_block:
+        context_parts.append("\n" + pat_block)
 
     if levels:
         context_parts.append("\n=== COMPANY ESCALATION MATRIX ===")
@@ -252,6 +259,74 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
                     o["recommended"] = first
                     first = False
 
+    def _ensure_three_options(options: list[dict]) -> list[dict]:
+        """
+        Guarantee exactly 3 options with stable option_id 1..3 and exactly one recommended.
+        This protects the UI and downstream agents from LLM variance and avoids the
+        prior behavior of collapsing to a single option when escalation is triggered.
+        """
+        if not options:
+            options = []
+
+        # Prefer keeping recommended first, then the rest in original order.
+        recommended = [o for o in options if o.get("recommended")]
+        non_recommended = [o for o in options if not o.get("recommended")]
+        ordered = (recommended[:1] + non_recommended + recommended[1:])
+
+        # Trim to 3 if too many.
+        ordered = ordered[:3]
+
+        # Pad to 3 with safe, decision-level placeholders if too few.
+        # (No procedures; just "what to decide".)
+        pad_templates = [
+            {
+                "title": "Hold the asset in a safe state pending review",
+                "description": "Keep the asset offline / in a safe state until decision authority reviews the findings and confirms next steps.",
+                "risks": ["Extended downtime while awaiting decision authority review"],
+                "constraints": [],
+                "confidence": 0.5,
+                "recommended": False,
+                "risk_level": "low",
+                "eta": "Until review is completed",
+            },
+            {
+                "title": "Continue diagnosis before committing to action",
+                "description": "Defer operational changes and gather additional evidence to isolate the root cause before any restart or load change decision.",
+                "risks": ["Delayed restoration if the issue is benign"],
+                "constraints": [],
+                "confidence": 0.5,
+                "recommended": False,
+                "risk_level": "medium",
+                "eta": "30–60 min",
+            },
+            {
+                "title": "Transfer operations to an alternative asset / fallback plan",
+                "description": "Route demand to an alternative asset or fallback plan while keeping the affected asset out of service until cleared.",
+                "risks": ["Capacity constraints or secondary impacts on other assets"],
+                "constraints": [],
+                "confidence": 0.5,
+                "recommended": False,
+                "risk_level": "medium",
+                "eta": "15–30 min",
+            },
+        ]
+
+        while len(ordered) < 3:
+            ordered.append({**pad_templates[len(ordered)]})
+
+        # Enforce exactly one recommended.
+        for i, o in enumerate(ordered):
+            o["recommended"] = (i == 0)
+            o["option_id"] = i + 1
+            o.setdefault("constraints", [])
+            o.setdefault("risks", [])
+            o.setdefault("confidence", 0.5)
+            o.setdefault("eta", "N/A")
+            o.setdefault("risk_level", "medium")
+            o["risk_level"] = (o.get("risk_level") or "medium").lower()
+
+        return ordered
+
     if not validated_options:
         validated_options.append(DecisionOption(
             option_id=1,
@@ -284,6 +359,9 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
             if level_keys:
                 auth_level = level_keys[0]
                 authority = levels[auth_level].get("name", authority or "")
+
+    # Always provide exactly 3 options.
+    validated_options = _ensure_three_options(validated_options)
 
     brief = DecisionBrief(
         incident_id=incident_card.get("incident_id", "unknown"),

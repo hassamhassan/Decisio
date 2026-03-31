@@ -325,6 +325,7 @@ class DecisioState(TypedDict, total=False):
 
     # ── Decision Brief ───────────────────────────────────────────────
     decision_brief: dict[str, Any]  # Serialised DecisionBrief
+    chosen_decision_option: dict[str, Any]  # Brief option the operator executed (before Success)
 
     # ── Escalation ───────────────────────────────────────────────────
     escalation: dict[str, Any]
@@ -350,6 +351,7 @@ class DecisioState(TypedDict, total=False):
     should_continue_diagnosis: bool  # Router flag for the diagnosis loop
     diagnostic_steps_completed: list[int]  # Which of the 10 steps have been answered
     retrieval_confidence: float  # How well Decision Memory patterns matched
+    memory_guidance: str  # Human-readable hint when a strong memory match exists
 
     # ── Messages (LLM chat history) ─────────────────────────────────
     messages: list[Any]

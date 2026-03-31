@@ -18,6 +18,9 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.llm import get_llm
+from src.agents.prompt_context import format_qa_history_for_llm
+
+EXPERT_CAPTURE_QA_PROMPT_WINDOW = 10
 from src.state.state import DecisioState
 
 logger = logging.getLogger(__name__)
@@ -92,13 +95,14 @@ def expert_capture_agent(state: DecisioState) -> DecisioState:
         for f in facts[-10:]:
             context_parts.append(f"- {f.get('key', '?')}: {f.get('value', '?')}")
 
-    # Full Q&A history for richer context
-    if qa_history:
-        context_parts.append(f"\n=== Q&A HISTORY ({len(qa_history)} exchanges) ===")
-        for i, qa in enumerate(qa_history, 1):
-            step = qa.get("diagnostic_step", "?")
-            context_parts.append(f"[Step {step}] Q{i}: {qa.get('question', '')}")
-            context_parts.append(f"         A{i}: {qa.get('answer', '')}")
+    qa_block = format_qa_history_for_llm(
+        qa_history,
+        max_exchanges=EXPERT_CAPTURE_QA_PROMPT_WINDOW,
+        heading=f"Q&A HISTORY ({len(qa_history)} exchanges)",
+        mode="escalation",
+    )
+    if qa_block:
+        context_parts.append("\n" + qa_block)
 
     # Decision brief options that were presented
     decision_brief = state.get("decision_brief", {})

@@ -24,7 +24,9 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
     const reconnectAttempts = useRef(0)
     const MAX_RECONNECT = 5
 
-    const isExpert = /^L\d+$/.test(userRole) || userRole === 'expert' || userRole === 'escalation_owner' || userRole === 'admin'
+    const isShiftManager = /^L\d+$/.test(userRole)
+    const isExpert = isShiftManager || userRole === 'expert' || userRole === 'escalation_owner' || userRole === 'admin'
+    const canEndSession = !isShiftManager && (userRole === 'escalation_owner' || userRole === 'admin' || userRole === 'super_admin')
 
     // Scroll to bottom when new messages arrive
     useEffect(() => {
@@ -143,7 +145,7 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
             }
             if (e.code === 4004) {
                 setStatus('disconnected')
-                setError('This session has already been claimed by another shift manager.')
+                setError(e.reason || 'Access denied for this escalation session.')
                 return
             }
             // Auto-reconnect unless session was explicitly closed
@@ -227,7 +229,7 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
                     </span>
                 </div>
                 <div className="chat-header-actions">
-                    {isExpert && status === 'connected' && (
+                    {canEndSession && status === 'connected' && (
                         <button className="btn btn-sm btn-danger-outline" onClick={closeSession} title="Close Session">
                             ✕ End
                         </button>

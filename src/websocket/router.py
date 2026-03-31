@@ -10,13 +10,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from src.auth import decode_access_token, TokenData, is_escalation_type
 from src.db.session import get_session
-from src.db.models import EscalationSession
+from src.db.models import EscalationSession, EscalationSessionStatus
 from src.services.escalation_service import EscalationService
 from src.websocket.manager import ws_manager
 from src.websocket.schemas import ChatMessageIn, ChatMessageOut
@@ -33,6 +34,19 @@ HEARTBEAT_INTERVAL = 30.0
 
 def _is_expert_user(user: TokenData) -> bool:
     return is_escalation_type(user.user_type) or user.user_type == "admin"
+
+
+def _parse_user_level(user_type: str) -> int | None:
+    """Extract integer from user_type like 'L1'."""
+    if not user_type:
+        return None
+    m = re.match(r"^L(\d+)$", user_type.strip())
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
 
 
 async def _get_session_and_validate(
@@ -68,8 +82,31 @@ async def _get_session_and_validate(
 
         # Expert path: allow any expert in the same company
         if _is_expert_user(token_data):
+            was_unassigned = esc.expert_id is None and esc.status == EscalationSessionStatus.WAITING
+
+            # Level-specific routing: only L{required_level} can claim.
+            # If required_level is NULL (older sessions), allow any escalation expert.
+            if token_data.user_type != "admin" and esc.required_level is not None:
+                user_level = _parse_user_level(token_data.user_type)
+                if user_level is None or user_level != esc.required_level:
+                    return None
+
             # Claim the session (assigns expert_id if unset, or confirms existing assignment)
             claimed = await svc.claim_session(sid, company_id, token_data.user_id)
+            # Notify other experts instantly so the first accept "wins"
+            # and the others see the status change (waiting -> active).
+            if claimed is not None and was_unassigned:
+                try:
+                    await ws_manager.notify_company(company_id, {
+                        "type": "session_claimed",
+                        "session_id": str(sid),
+                        "company_id": company_id,
+                        "expert_id": token_data.user_id,
+                        "required_level": esc.required_level,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                except Exception as e:
+                    logger.warning("Failed to broadcast session_claimed event: %s", e, exc_info=True)
             return claimed  # None if a different expert already claimed it
 
         return None  # All other roles denied

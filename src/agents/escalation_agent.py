@@ -19,6 +19,9 @@ from src.llm import get_llm
 from src.state.state import DecisioState
 from src.data.assets import get_asset, get_upstream_downstream
 from src.data.escalation_matrix import get_escalation_levels, get_escalation_rules
+from src.agents.prompt_context import format_qa_history_for_llm
+
+ESCALATION_QA_PROMPT_WINDOW = 12
 
 import logging
 logger = logging.getLogger(__name__)
@@ -249,14 +252,14 @@ def escalation_agent(state: DecisioState) -> DecisioState:
         for r in escalation_reasons:
             context_parts.append(f"- {r}")
 
-    if qa_history:
-        context_parts.append(f"\n=== Q&A HISTORY ({len(qa_history)} exchanges) ===")
-        for qa in qa_history:
-            step = qa.get("diagnostic_step", "?")
-            context_parts.append(f"[Step {step}] Q: {qa.get('question', '')}")
-            context_parts.append(f"         A: {qa.get('answer', '')}")
-            if qa.get("signals"):
-                context_parts.append(f"         Signals: {', '.join(qa['signals'])}")
+    qa_block = format_qa_history_for_llm(
+        qa_history,
+        max_exchanges=ESCALATION_QA_PROMPT_WINDOW,
+        heading=f"Q&A HISTORY ({len(qa_history)} exchanges)",
+        mode="escalation",
+    )
+    if qa_block:
+        context_parts.append("\n" + qa_block)
 
     if facts:
         context_parts.append(f"\n=== KNOWN FACTS ({len(facts)}) ===")

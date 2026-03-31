@@ -43,6 +43,7 @@ class EscalationService:
         self,
         company_id: int,
         user_id: int,
+        required_level: int | None = None,
     ) -> EscalationSession:
         """
         Create a new escalation session for the given company and user.
@@ -54,6 +55,7 @@ class EscalationService:
             company_id=company_id,
             user_id=user_id,
             expert_id=None,
+            required_level=required_level,
             status=EscalationSessionStatus.WAITING,
         )
         self.session.add(esc)
@@ -71,11 +73,12 @@ class EscalationService:
         company_id: int,
         session_id: uuid.UUID,
         online_expert_ids: set[int] | None = None,
+        required_level: int | None = None,
     ) -> Optional[int]:
         """
         Try to assign an available expert to the session.
-        If online_expert_ids is provided (from WebSocketManager), only those experts are considered.
-        Otherwise queries DB for users with expert role in the company (is_active).
+        If required_level is provided, filters for that specific L-level.
+        If online_expert_ids is provided, prioritizes those experts.
         Returns expert_id if assigned, else None.
         """
         esc = await self.session.get(EscalationSession, session_id)
@@ -84,33 +87,53 @@ class EscalationService:
         if esc.expert_id is not None:
             return esc.expert_id
 
-        if online_expert_ids is not None:
-            # Prefer online experts
-            candidate_ids = list(online_expert_ids)
-        else:
-            candidate_ids = []
+        candidate_ids = list(online_expert_ids) if online_expert_ids else []
 
-        if not candidate_ids:
-            # Fallback: any expert role user in company
-            result = await self.session.execute(
-                sa_select(User.id).where(
-                    User.company_id == company_id,
-                    User.is_active.is_(True),
+        # Build base query
+        query = sa_select(User.id).where(
+            User.company_id == company_id,
+            User.is_active.is_(True),
+        )
+
+        if candidate_ids:
+            query = query.where(User.id.in_(candidate_ids))
+
+        if required_level is not None:
+            query = query.where(User.user_type == f"L{required_level}")
+        else:
+            query = query.where(
+                sa_or(
+                    User.user_type.like("L%"),
+                    User.user_type.in_(list(_LEGACY_ESCALATION_TYPES)),
+                )
+            )
+
+        result = await self.session.execute(query.limit(1))
+        expert_id_val = result.scalar_one_or_none()
+
+        # Fallback if no online expert found for the required level
+        if expert_id_val is None and candidate_ids:
+            fallback_query = sa_select(User.id).where(
+                User.company_id == company_id,
+                User.is_active.is_(True),
+            )
+            if required_level is not None:
+                fallback_query = fallback_query.where(User.user_type == f"L{required_level}")
+            else:
+                fallback_query = fallback_query.where(
                     sa_or(
                         User.user_type.like("L%"),
                         User.user_type.in_(list(_LEGACY_ESCALATION_TYPES)),
-                    ),
-                ).limit(1)
-            )
+                    )
+                )
+            result = await self.session.execute(fallback_query.limit(1))
             expert_id_val = result.scalar_one_or_none()
-            if expert_id_val is not None:
-                candidate_ids = [expert_id_val]
 
-        if not candidate_ids:
-            logger.info("No available expert for company_id=%s", company_id)
+        if expert_id_val is None:
+            logger.info("No available expert for company_id=%s req_level=%s", company_id, required_level)
             return None
 
-        expert_id = candidate_ids[0]
+        expert_id = expert_id_val
         esc.expert_id = expert_id
         esc.status = EscalationSessionStatus.ACTIVE
         await self.session.flush()

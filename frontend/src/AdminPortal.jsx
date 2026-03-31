@@ -91,6 +91,11 @@ export default function AdminPortal() {
 
     const unreadCount = notifications.filter(n => !n.is_read).length
 
+    // When an admin notification indicates a missing machine, auto-open the
+    // "Add Equipment" modal with the missing equipment ID prefilled.
+    const [equipmentCreateNonce, setEquipmentCreateNonce] = useState(0)
+    const [equipmentCreatePrefillId, setEquipmentCreatePrefillId] = useState('')
+
     const fetchNotifications = useCallback(async () => {
         try {
             const data = await getAdminNotifications()
@@ -189,6 +194,17 @@ export default function AdminPortal() {
             } catch { /* non-fatal */ }
         }
         setNotifOpen(false)
+
+        // Route based on notification type
+        if (notif.notification_type === 'MACHINE_NOT_REGISTERED') {
+            const missingId = notif.payload?.missing_machine_id || ''
+            setEquipmentCreatePrefillId(missingId)
+            setEquipmentCreateNonce(n => n + 1)
+            setSection('equipment')
+            return
+        }
+
+        // Default: escalation configuration
         setSection('escalation')
     }
 
@@ -279,7 +295,12 @@ export default function AdminPortal() {
                 {section === 'dashboard' && <DashboardSection />}
                 {section === 'users' && <UsersSection />}
                 {section === 'incidents' && <IncidentsSection />}
-                {section === 'equipment' && <EquipmentSection />}
+                {section === 'equipment' && (
+                    <EquipmentSection
+                        openCreateNonce={equipmentCreateNonce}
+                        prefillId={equipmentCreatePrefillId}
+                    />
+                )}
                 {section === 'safety' && <SafetySection />}
                 {section === 'escalation' && <EscalationSection />}
                 {section === 'live' && <LiveEscalationsSection />}
@@ -732,7 +753,7 @@ function IncidentDetailContent({ detail, onClose }) {
 
 // ── Equipment (CRUD) ───────────────────────────────────────────────
 
-function EquipmentSection() {
+function EquipmentSection({ openCreateNonce, prefillId }) {
     const [equipment, setEquipment] = useState([])
     const [loading, setLoading] = useState(true)
     const [showForm, setShowForm] = useState(false)
@@ -743,12 +764,28 @@ function EquipmentSection() {
     const load = () => { setLoading(true); listEquipment().then(d => setEquipment(d.equipment || [])).catch(console.error).finally(() => setLoading(false)) }
     useEffect(() => { load() }, [])
 
-    const openCreate = () => {
+    const openCreate = (prefill = '') => {
         setEditItem(null)
-        setForm({ id: '', name: '', equipment_type: 'rotating', process_line: 'Line A', criticality: 'medium', description: '', upstream_id: '', downstream_id: '' })
+        setForm({
+            id: prefill || '',
+            name: prefill || '',
+            equipment_type: 'rotating',
+            process_line: 'Line A',
+            criticality: 'medium',
+            description: '',
+            upstream_id: '',
+            downstream_id: '',
+        })
         setShowForm(true)
         setError('')
     }
+
+    // Auto-open "Add Equipment" when a notification requests it.
+    useEffect(() => {
+        if (openCreateNonce > 0) {
+            openCreate(prefillId || '')
+        }
+    }, [openCreateNonce, prefillId])
 
     const openEdit = (eq) => {
         setEditItem(eq)
@@ -786,7 +823,7 @@ function EquipmentSection() {
         <div className="admin-section">
             <div className="admin-header-row">
                 <h2 className="admin-title">Equipment Registry</h2>
-                <button className="admin-btn primary" onClick={openCreate}>+ Add Equipment</button>
+                <button className="admin-btn primary" onClick={() => openCreate('')}>+ Add Equipment</button>
             </div>
 
             {showForm && (

@@ -13,6 +13,7 @@ import os
 import uuid
 import logging
 import traceback
+import re
 from datetime import datetime, timezone
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -28,6 +29,7 @@ load_dotenv()
 
 from src.graph import build_graph, build_answer_graph, build_outcome_graph
 from src.agents.decision_brief_agent import decision_brief_agent
+from src.agents.retrieval_agent import retrieval_agent
 from src.agents.outcome_capture_agent import outcome_capture_agent
 from src.agents.memory_write_agent import memory_write_agent
 from src.agents.escalation_agent import escalation_agent
@@ -118,6 +120,10 @@ class AnswerRequest(BaseModel):
 
 class OutcomeRequest(BaseModel):
     outcome: str = Field(..., min_length=1, max_length=5_000)
+    selected_option_id: Optional[int] = Field(
+        default=None,
+        description="decision_brief.options[].option_id the operator ran before Success.",
+    )
 
 
 class VerificationRequest(BaseModel):
@@ -141,6 +147,8 @@ class IncidentResponse(BaseModel):
     escalation_triggered: Optional[bool] = False
     escalation_reasons: Optional[list] = None
     retrieved_patterns: Optional[list] = None
+    memory_guidance: Optional[str] = None
+    retrieval_confidence: Optional[float] = None
     safety_constraints: Optional[list] = None
     outcome: Optional[str] = None
     failed_attempts: Optional[int] = 0
@@ -158,11 +166,21 @@ async def _safe_background(coro) -> None:
         logger.exception("Background task failed")
 
 
+# Retries for PENDING_ESCALATION_CONFIG reprocessing (transient DB / LLM flakes)
+_REPROCESS_ESCALATION_MAX_ATTEMPTS = 5
+_REPROCESS_ESCALATION_BASE_DELAY_SEC = 1.5
+
+
 async def _reprocess_pending_escalations(company_id: int) -> None:
     """Re-run escalation_agent on every incident that was parked as
     PENDING_ESCALATION_CONFIG for this company.  Called in the background
     after an admin saves the first escalation level so parked incidents are
     immediately re-routed to the correct escalation level.
+
+    Per-incident retries with exponential backoff reduce limbo when updates
+    fail transiently. After all attempts fail, the incident stays pending
+    until the next admin save triggers another run or an operator reloads
+    config (same function).
     """
     try:
         from sqlalchemy import select as sa_select
@@ -178,22 +196,41 @@ async def _reprocess_pending_escalations(company_id: int) -> None:
             pending = result.scalars().all()
 
         for inc in pending:
-            try:
-                state = crud.incident_to_state(inc)
-                updated = escalation_agent(state)
-                if updated:
-                    state.update(updated)
+            last_err: Exception | None = None
+            for attempt in range(_REPROCESS_ESCALATION_MAX_ATTEMPTS):
+                try:
+                    state = crud.incident_to_state(inc)
+                    updated = escalation_agent(state)
+                    if updated:
+                        state.update(updated)
                     async with get_session() as session:
                         await crud.update_incident(session, str(inc.id), state)
-                    # Mark the notification as resolved
                     async with get_session() as session:
                         await crud.mark_all_notifications_read_for_incident(
                             session, company_id, str(inc.id)
                         )
-            except Exception as inner_err:
-                logger.warning(
-                    "Failed to reprocess pending escalation for incident %s: %s",
-                    inc.id, inner_err,
+                    last_err = None
+                    break
+                except Exception as inner_err:
+                    last_err = inner_err
+                    logger.warning(
+                        "Reprocess pending escalation attempt %s/%s failed for incident %s: %s",
+                        attempt + 1,
+                        _REPROCESS_ESCALATION_MAX_ATTEMPTS,
+                        inc.id,
+                        inner_err,
+                    )
+                    if attempt + 1 < _REPROCESS_ESCALATION_MAX_ATTEMPTS:
+                        delay = _REPROCESS_ESCALATION_BASE_DELAY_SEC * (2**attempt)
+                        await asyncio.sleep(delay)
+
+            if last_err is not None:
+                logger.error(
+                    "Giving up reprocessing PENDING_ESCALATION_CONFIG for incident %s after %s attempts; "
+                    "incident remains pending until the next escalation config save",
+                    inc.id,
+                    _REPROCESS_ESCALATION_MAX_ATTEMPTS,
+                    exc_info=(type(last_err), last_err, last_err.__traceback__),
                 )
     except Exception as e:
         logger.warning("_reprocess_pending_escalations failed: %s", e)
@@ -201,7 +238,7 @@ async def _reprocess_pending_escalations(company_id: int) -> None:
 
 async def _ensure_escalation_session(state: dict, user: TokenData) -> None:
     """
-    When escalation is triggered, create an escalation session, try to assign an expert,
+    When escalation is triggered, create an escalation session (unassigned by default),
     and add session_id + ws_url to state["escalation"]. Idempotent if already set.
 
     If the escalation matrix is not yet configured (pending_config), skip the
@@ -264,21 +301,20 @@ async def _ensure_escalation_session(state: dict, user: TokenData) -> None:
     try:
         async with get_session() as session:
             svc = EscalationService(session)
-            esc = await svc.create_session(company_id=user.company_id, user_id=user.user_id)
+            escalation_info = state.get("escalation") or {}
+            # escalation_agent sets escalation_level as an integer.
+            req_level_val = escalation_info.get("escalation_level")
+            try:
+                req_level = int(req_level_val) if req_level_val is not None else None
+            except Exception:
+                req_level = None
+            esc = await svc.create_session(
+                company_id=user.company_id,
+                user_id=user.user_id,
+                required_level=req_level,
+            )
             session_id_val = str(esc.id)
             state["escalation_session_id"] = session_id_val
-            if hasattr(ws_manager, 'get_online_experts_async'):
-                try:
-                    online = await ws_manager.get_online_experts_async(user.company_id)
-                except Exception as redis_err:
-                    logger.warning("Redis unavailable for expert lookup, skipping auto-assign: %s", redis_err)
-                    online = None
-            else:
-                online = ws_manager.get_online_experts(user.company_id)
-            try:
-                await svc.assign_available_expert(user.company_id, esc.id, online_expert_ids=online or None)
-            except Exception as assign_err:
-                logger.warning("Expert auto-assignment failed (non-fatal): %s", assign_err)
         state["escalation"] = state.get("escalation") or {}
         state["escalation"]["session_id"] = session_id_val
         state["escalation"]["ws_url"] = f"{WS_BASE_URL}/ws/chat/{user.company_id}/{session_id_val}"
@@ -289,6 +325,7 @@ async def _ensure_escalation_session(state: dict, user: TokenData) -> None:
                 "type": "new_escalation",
                 "session_id": session_id_val,
                 "company_id": user.company_id,
+                "required_level": req_level,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
         except Exception:
@@ -324,6 +361,8 @@ def _state_to_response(state: dict) -> IncidentResponse:
         escalation_triggered=state.get("escalation_triggered") or False,
         escalation_reasons=state.get("escalation_reasons") or [],
         retrieved_patterns=state.get("retrieved_patterns") or [],
+        memory_guidance=state.get("memory_guidance"),
+        retrieval_confidence=state.get("retrieval_confidence"),
         safety_constraints=state.get("safety_constraints") or [],
         outcome=state.get("outcome") or "pending",
         failed_attempts=state.get("failed_attempts") or 0,
@@ -517,13 +556,6 @@ async def submit_answer(incident_id: str, req: AnswerRequest, user: TokenData = 
     if not state:
         raise HTTPException(404, "Incident not found")
 
-    # Record whether the incident already exists in DB before this call.
-    # We use this later to decide whether to save an individual QA row:
-    # when incident_card was just created in this turn, crud.create_incident
-    # already bulk-saves the full qa_history, so a separate add_qa_record
-    # would be redundant AND would race the INSERT of the parent row.
-    incident_existed_in_db = use_db() and bool(state.get("incident_card"))
-
     questions = state.get("questions") or []
     current_q = (questions[0] if questions else None) or {}
 
@@ -548,13 +580,20 @@ async def submit_answer(incident_id: str, req: AnswerRequest, user: TokenData = 
             })
             state["qa_history"] = qa_hist
             state.pop("clarification_question", None)
-            state = intake_graph.invoke(state)
+            # Merge graph output into pre-invoke state so API-only keys
+            # (company_id, _session_id, etc.) are never dropped when the
+            # compiled graph returns a partial channel update.
+            _pre_intake = dict(state)
+            _out = intake_graph.invoke(_pre_intake) or {}
+            state = {**_pre_intake, **_out}
         else:
-            state = answer_graph.invoke({
-                **state,
+            _pre_answer = dict(state)
+            _out = answer_graph.invoke({
+                **_pre_answer,
                 "user_answer": answer,
                 "current_question": current_q,
-            })
+            }) or {}
+            state = {**_pre_answer, **_out}
     except Exception as e:
         logger.error(f"Answer processing error: {e}")
         raise HTTPException(500, f"Processing error: {str(e)}")
@@ -591,22 +630,9 @@ async def submit_answer(incident_id: str, req: AnswerRequest, user: TokenData = 
     # before we try to insert a child QA record.
     await _save_state(incident_id, state)
 
-    # Save an individual Q&A row only for diagnostic-phase answers (i.e. when
-    # the incident already existed in the DB before this call).  When the
-    # incident_card was just created in this very call, crud.create_incident
-    # already bulk-saved the full qa_history, so a separate row would be a
-    # duplicate.  And during the clarification phase there is no parent row
-    # yet so the FK would be violated.
-    if incident_existed_in_db:
-        async with get_session() as session:
-            await crud.add_qa_record(
-                session,
-                incident_id=incident_id,
-                question=(current_q or {}).get("question", ""),
-                answer=answer,
-                category=(current_q or {}).get("category", "general"),
-                diagnostic_step=(current_q or {}).get("diagnostic_step", 1),
-            )
+    # QA rows: crud.create_incident and crud.update_incident already sync
+    # state["qa_history"] into QARecord (delta append). Do not call
+    # add_qa_record here — it duplicated rows and risked deadlocks.
 
     await _ensure_escalation_session(state, user)
     return _state_to_response(state)
@@ -621,6 +647,9 @@ async def generate_brief(incident_id: str, user: TokenData = Depends(require_aut
         raise HTTPException(404, "Incident not found")
 
     try:
+        mem_update = retrieval_agent(state)
+        if mem_update:
+            state.update(mem_update)
         brief_update = decision_brief_agent(state)
         if brief_update:
             state.update(brief_update)
@@ -650,6 +679,34 @@ async def submit_outcome(incident_id: str, req: OutcomeRequest, user: TokenData 
 
     state["outcome_notes"] = outcome_notes
     state["status"] = "EXECUTING"
+
+    # Operator-selected brief option (stored to Decision Memory on success)
+    brief = state.get("decision_brief") or {}
+    opts = brief.get("options") or []
+    sel_id = req.selected_option_id
+    if sel_id is not None:
+        try:
+            sel_id_int = int(sel_id)
+        except (TypeError, ValueError):
+            sel_id_int = None
+        chosen = None
+        if sel_id_int is not None:
+            for o in opts:
+                oid = o.get("option_id")
+                try:
+                    if oid is not None and int(oid) == sel_id_int:
+                        chosen = o
+                        break
+                except (TypeError, ValueError):
+                    continue
+        else:
+            chosen = None
+        if chosen:
+            state["chosen_decision_option"] = chosen
+        else:
+            state.pop("chosen_decision_option", None)
+    else:
+        state.pop("chosen_decision_option", None)
 
     # Run outcome capture
     try:
@@ -687,6 +744,13 @@ async def submit_outcome(incident_id: str, req: OutcomeRequest, user: TokenData 
         # Mark as DONE to distinguish successfully completed incidents
         # from escalated / still-open ones in the UI.
         state["status"] = "DONE"
+        # Important: success means escalation must NOT be created/opened.
+        # Earlier steps may have set escalation_triggered=True; clear it and
+        # remove any existing escalation session payload so the UI won't
+        # show the escalation chat.
+        state["escalation_triggered"] = False
+        state["escalation"] = None
+        state["escalation_session_id"] = None
 
     elif state.get("escalation_triggered"):
         # Escalate
@@ -699,7 +763,9 @@ async def submit_outcome(incident_id: str, req: OutcomeRequest, user: TokenData 
         state["status"] = "ESCALATED"
 
     await _save_state(incident_id, state)
-    await _ensure_escalation_session(state, user)
+    # Only create escalation sessions when escalation is still required.
+    if state.get("escalation_triggered"):
+        await _ensure_escalation_session(state, user)
     # Re-save after escalation session creation so session_id persists
     if state.get("escalation_session_id"):
         await _save_state(incident_id, state)
@@ -749,9 +815,14 @@ async def verify_resolution(incident_id: str, req: VerificationRequest, user: To
             pass
         # Verified successful resolution → mark as DONE
         state["status"] = "DONE"
+        # Success means escalation must NOT be created/opened.
+        state["escalation_triggered"] = False
+        state["escalation"] = None
+        state["escalation_session_id"] = None
 
     await _save_state(incident_id, state)
-    await _ensure_escalation_session(state, user)
+    if state.get("escalation_triggered"):
+        await _ensure_escalation_session(state, user)
     return _state_to_response(state)
 
 
@@ -1025,7 +1096,7 @@ async def check_experts_available(user: TokenData = Depends(require_auth)):
 async def list_escalation_sessions(user: TokenData = Depends(require_auth)):
     """
     List escalation sessions for the user's company.
-    - Escalation-level users (L1, L2, ...) see ALL waiting/active sessions so they can join.
+    - Escalation-level users (L1, L2, ...) see only sessions matching their required_level.
     - Regular users see only their own sessions.
     - Admins see all sessions.
     """
@@ -1033,6 +1104,18 @@ async def list_escalation_sessions(user: TokenData = Depends(require_auth)):
         raise HTTPException(403, "Super admin has no company scope.")
 
     is_expert = is_escalation_type(user.user_type) or user.user_type == "admin"
+
+    # Tenant routing by escalation level:
+    # L1 sees only required_level=1, L2 sees only required_level=2, etc.
+    # If required_level is NULL (older sessions), include them for compatibility.
+    user_level: int | None = None
+    if user.user_type:
+        m = re.match(r"^L(\d+)$", user.user_type.strip())
+        if m:
+            try:
+                user_level = int(m.group(1))
+            except Exception:
+                user_level = None
 
     async with get_session() as session:
         # Load users for display names
@@ -1043,6 +1126,15 @@ async def list_escalation_sessions(user: TokenData = Depends(require_auth)):
 
         if not is_expert:
             query = query.where(EscalationSession.user_id == user.user_id)
+        elif user_level is not None and user.user_type != "admin":
+            # Expert handler L1-L4: filter to their required level.
+            from sqlalchemy import or_ as sa_or
+            query = query.where(
+                sa_or(
+                    EscalationSession.required_level == user_level,
+                    EscalationSession.required_level.is_(None),
+                )
+            )
 
         result = await session.execute(query)
         sessions_list = result.scalars().all()
@@ -1071,6 +1163,7 @@ async def list_escalation_sessions(user: TokenData = Depends(require_auth)):
                     "user_name": users_map.get(s.user_id, f"User #{s.user_id}"),
                     "expert_id": s.expert_id,
                     "expert_name": users_map.get(s.expert_id, None) if s.expert_id else None,
+                    "required_level": s.required_level,
                     "created_at": s.created_at.isoformat() if s.created_at else None,
                     "ws_url": f"{WS_BASE_URL}/ws/chat/{user.company_id}/{s.id}",
                 }
@@ -1526,7 +1619,7 @@ class UpdateUserRequest(BaseModel):
 
 
 def _user_to_dict(u: User) -> dict:
-    return {
+    d = {
         "id": u.id,
         "company_id": u.company_id,
         "username": u.username,
@@ -1536,6 +1629,16 @@ def _user_to_dict(u: User) -> dict:
         "is_active": u.is_active,
         "created_at": u.created_at.isoformat() if u.created_at else "",
     }
+    if u.user_type and u.user_type.startswith("L"):
+        try:
+            level_num = int(u.user_type[1:])
+            from src.data.escalation_matrix import get_escalation_levels
+            levels = get_escalation_levels(company_id=u.company_id)
+            if levels and level_num in levels:
+                d["escalation_level_name"] = levels[level_num].get("name", "")
+        except Exception:
+            pass
+    return d
 
 
 @app.post("/api/auth/login")
@@ -2306,7 +2409,17 @@ if os.path.exists(frontend_dist):
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        """Catch-all: serve index.html for any non-API route (SPA support)."""
+        """Catch-all: serve static files or index.html for non-API routes (SPA).
+
+        Unregistered ``/api/...`` paths must not return HTML 200 — API clients
+        need a JSON 404. FastAPI only reaches this handler when no API route
+        matched.
+        """
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "not_found", "path": f"/{full_path}"},
+            )
         # Try to serve the exact file first (e.g. favicon.ico, vite.svg)
         file_path = os.path.join(frontend_dist, full_path)
         if full_path and os.path.isfile(file_path):

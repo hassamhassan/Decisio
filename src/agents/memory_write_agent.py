@@ -38,7 +38,7 @@ def memory_write_agent(state: DecisioState) -> DecisioState:
     hypotheses = state.get("hypotheses", [])
     facts = state.get("facts", [])
     qa_history = state.get("qa_history", [])
-    decision_brief = state.get("decision_brief", {})
+    chosen = state.get("chosen_decision_option") or {}
     resolution_summary = state.get("resolution_summary", "")
     failed_attempts = state.get("failed_attempts", 0)
     escalation_reasons = state.get("escalation_reasons", [])
@@ -70,11 +70,36 @@ def memory_write_agent(state: DecisioState) -> DecisioState:
             signals.append(f"{f.get('key', '?')}: {f.get('value', '?')}")
 
     from datetime import datetime, timezone
+
     company_id = state.get("company_id")
+    prob_line = (incident_card.get("normalized_summary") or incident_card.get("report") or "Unknown incident").strip()
+    asset = (incident_card.get("asset_id") or "").strip()
+    problem_summary = f"{prob_line} (asset: {asset})" if asset else prob_line
+
+    if chosen:
+        opt_title = (chosen.get("title") or "").strip()
+        opt_desc = (chosen.get("description") or "").strip()
+        solution_for_memory = f"{opt_title}: {opt_desc}".strip(": ").strip() if (opt_title or opt_desc) else resolution_summary
+    else:
+        solution_for_memory = resolution_summary
+
+    if not (solution_for_memory or "").strip():
+        solution_for_memory = "Success — see incident notes"
+
+    sel_opt_id = chosen.get("option_id")
+    try:
+        sel_opt_id = int(sel_opt_id) if sel_opt_id is not None else None
+    except (TypeError, ValueError):
+        sel_opt_id = None
+
     pattern = {
-        "title": f"{incident_card.get('normalized_summary', 'Unknown incident')} — {root_cause or 'resolved'}",
+        "title": problem_summary[:500],
+        "problem_summary": problem_summary[:2000],
         "signals": signals[:10],  # Top 10 signals
-        "decision_taken": resolution_summary,
+        "decision_taken": (solution_for_memory or "")[:5000],
+        "resolution_summary": (resolution_summary or "")[:5000],
+        "selected_option_id": sel_opt_id,
+        "selected_option_title": (chosen.get("title") or "")[:500],
         "must_escalate": failed_attempts >= 2,
         "root_cause": root_cause,
         "root_cause_category": _get_root_cause_category(hypotheses),
@@ -107,8 +132,15 @@ def memory_write_agent(state: DecisioState) -> DecisioState:
         client = _get_qdrant()
         embedder = _get_embedder()
 
-        if client and embedder:
-            text = f"{pattern['title']}. Signals: {', '.join(pattern['signals'][:5])}"
+        if company_id is None:
+            logger.warning("Skipping Qdrant upsert: company_id missing (tenant isolation).")
+        elif client and embedder:
+            text = (
+                f"Problem: {pattern['problem_summary']}. "
+                f"Chosen decision: {pattern['decision_taken']}. "
+                f"Root cause: {root_cause or 'n/a'}. "
+                f"Signals: {', '.join(pattern['signals'][:5])}"
+            )
             vector = embedder.encode(text).tolist()
 
             point = PointStruct(

@@ -366,6 +366,9 @@ class EscalationSession(Base):
     )
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     expert_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    # Tenant routing: only L{required_level} experts are allowed to claim the session.
+    # Null means "backwards compatibility" (allow any escalation-level expert).
+    required_level = Column(Integer, nullable=True, index=True)
     status = Column(
         String(16), nullable=False, default=EscalationSessionStatus.WAITING, index=True,
     )

@@ -224,10 +224,12 @@ export async function generateBrief(incidentId) {
     });
 }
 
-export async function submitOutcome(incidentId, outcome) {
+export async function submitOutcome(incidentId, outcome, selectedOptionId = null) {
+    const body = { outcome };
+    if (selectedOptionId != null) body.selected_option_id = selectedOptionId;
     return apiFetch(`${API_BASE}/incidents/${incidentId}/outcome`, {
         method: 'POST',
-        body: JSON.stringify({ outcome }),
+        body: JSON.stringify(body),
     });
 }
 

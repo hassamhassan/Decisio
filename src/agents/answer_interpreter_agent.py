@@ -150,9 +150,10 @@ def answer_interpreter_agent(state: DecisioState) -> DecisioState:
     escalation_reasons = list(state.get("escalation_reasons") or [])
     signals = parsed.get("signals", [])
 
+    # Do not auto-escalate purely from an LLM signal here; treat it as advisory.
+    # The Safety agent applies programmatic escalation rules (risk threshold, blocks, contradictions).
     if "needs_escalation" in signals:
-        escalation_triggered = True
-        escalation_reasons.append(f"Escalation signal from answer at step {current_step}")
+        escalation_reasons.append(f"Escalation suggested by answer at step {current_step}")
     if "safety_concern" in signals:
         escalation_reasons.append(f"Safety concern detected at step {current_step}")
 

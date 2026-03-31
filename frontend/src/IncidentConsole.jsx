@@ -28,6 +28,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
     const [showSidebar, setShowSidebar] = useState(user?.user_type === 'viewer')
     const chatRef = useRef(null)
     const inputRef = useRef(null)
+    const outcomeSelectedOptionIdRef = useRef(null)
 
     const storedUser = getStoredUser()
 
@@ -73,6 +74,9 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
             }
             if (data.incident_card) {
                 msgs.push({ id: Math.random(), type: 'system', content: { type: 'incident_card', data: data.incident_card } })
+                if (data.memory_guidance) {
+                    msgs.push({ id: Math.random(), type: 'system', content: { type: 'memory_guidance', message: data.memory_guidance } })
+                }
                 if (data.retrieved_patterns?.length > 0) {
                     msgs.push({ id: Math.random(), type: 'system', content: { type: 'patterns', data: data.retrieved_patterns } })
                 }
@@ -102,8 +106,10 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
             setMessages(msgs)
 
-            if (data.status === 'CLOSED') setPhase('closed')
-            else if (data.escalation?.session_id) {
+            if (data.status === 'CLOSED' || data.status === 'DONE') {
+                setPhase('closed')
+                setEscalationSession(null)
+            } else if (data.escalation?.session_id) {
                 setEscalationSession(data.escalation)
                 setChatMinimized(false)
                 setPhase('escalation_chat')
@@ -159,7 +165,9 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                     // Show incident card
                     addMessage('system', { type: 'incident_card', data: data.incident_card })
 
-                    // Show patterns
+                    if (data.memory_guidance) {
+                        addMessage('system', { type: 'memory_guidance', message: data.memory_guidance })
+                    }
                     if (data.retrieved_patterns?.length > 0) {
                         addMessage('system', { type: 'patterns', data: data.retrieved_patterns })
                     }
@@ -201,9 +209,13 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
             try {
                 const data = await submitAnswer(incident.incident_id, text)
+                const prevMemoryGuidance = incident?.memory_guidance || ''
                 // If card was just generated, show it
                 if (!incident.incident_card && data.incident_card) {
                     addMessage('system', { type: 'incident_card', data: data.incident_card })
+                    if (data.memory_guidance) {
+                        addMessage('system', { type: 'memory_guidance', message: data.memory_guidance })
+                    }
                     if (data.retrieved_patterns?.length > 0) {
                         addMessage('system', { type: 'patterns', data: data.retrieved_patterns })
                     }
@@ -211,6 +223,17 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
                 setIncident(data)
                 loadHistory()
+
+                if (data.memory_guidance && data.memory_guidance !== prevMemoryGuidance) {
+                    addMessage('system', { type: 'memory_guidance', message: data.memory_guidance })
+                }
+                if (data.retrieved_patterns?.length > 0 && incident.incident_card) {
+                    const prevIds = (incident.retrieved_patterns || []).map((p) => p.pattern_id).join(',')
+                    const nextIds = (data.retrieved_patterns || []).map((p) => p.pattern_id).join(',')
+                    if (nextIds !== prevIds) {
+                        addMessage('system', { type: 'patterns', data: data.retrieved_patterns })
+                    }
+                }
 
                 if (data.clarification_question) {
                     addMessage('system', { type: 'questions', data: [{ category: 'clarification', question: data.clarification_question }] })
@@ -261,13 +284,17 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
             setLoading(true)
 
             try {
-                const data = await submitOutcome(incident.incident_id, text)
+                const selectedOpt = outcomeSelectedOptionIdRef.current
+                outcomeSelectedOptionIdRef.current = null
+                const data = await submitOutcome(incident.incident_id, text, selectedOpt)
                 setIncident(data)
 
                 addMessage('system', { type: 'outcome_result', data })
 
                 if (data.outcome === 'success') {
                     setPhase('closed')
+                    setEscalationSession(null)
+                    setChatMinimized(false)
                 } else if (data.escalation_triggered) {
                     addMessage('system', { type: 'escalation_notice', message: '⏳ Your issue is being escalated to a specialist. Please wait while we connect you with the right team...' })
                     if (data.escalation) {
@@ -302,7 +329,8 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
         setInput('')
     }
 
-    const handleOutcomeButton = (outcome) => {
+    const handleOutcomeButton = (outcome, selectedOptionId = null) => {
+        outcomeSelectedOptionIdRef.current = selectedOptionId
         setInput(outcome)
         setTimeout(() => {
             const form = document.querySelector('form')
@@ -332,8 +360,8 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                         </button>
                     )}
                     <div className="header-user-area">
-                        {/* Live chat button — when escalation session exists, for all roles including viewer */}
-                        {escalationSession?.session_id && (
+                    {/* Live chat button — hide for resolved incidents */}
+                    {escalationSession?.session_id && incident?.status !== 'DONE' && incident?.status !== 'CLOSED' && (
                             <button
                                 className="btn btn-outline btn-sm"
                                 onClick={() => {
@@ -504,6 +532,21 @@ function renderSystemMessage(content, onOutcome, phase) {
             return <DecisionBrief data={content.data} onOutcome={onOutcome} showOutcome={phase === 'outcome'} escalationTriggered={content.escalationTriggered} />
         case 'patterns':
             return <Patterns data={content.data} />
+        case 'memory_guidance':
+            return (
+                <div style={{
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: 'rgba(59, 130, 246, 0.08)',
+                    border: '1px solid rgba(59, 130, 246, 0.25)',
+                    fontSize: '13px',
+                    color: 'var(--text-bright)',
+                    lineHeight: 1.55,
+                }}>
+                    <div className="message-label" style={{ marginBottom: 6 }}>Decision Memory</div>
+                    {content.message}
+                </div>
+            )
         case 'escalation':
             return <Escalation data={content.data} />
         case 'escalation_notice':
@@ -618,6 +661,17 @@ function StatusBar({ data }) {
 
 
 function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered }) {
+    const [selectedOption, setSelectedOption] = useState(null)
+
+    useEffect(() => {
+        if (!showOutcome || !data?.options?.length) {
+            setSelectedOption(null)
+            return
+        }
+        const recIdx = data.options.findIndex((o) => o.recommended)
+        setSelectedOption(recIdx >= 0 ? recIdx : 0)
+    }, [showOutcome, data])
+
     if (!data) return null
 
     return (
@@ -639,7 +693,11 @@ function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered }) {
                 )}
 
                 {data.options?.map((opt, i) => (
-                    <div key={i} className={`option-card ${!escalationTriggered && opt.recommended ? 'recommended' : ''}`}>
+                    <div
+                        key={i}
+                        className={`option-card ${!escalationTriggered && opt.recommended ? 'recommended' : ''} ${selectedOption === i ? 'selected' : ''} ${showOutcome ? 'selectable' : ''}`}
+                        onClick={() => showOutcome && setSelectedOption(i)}
+                    >
                         <div className="option-header">
                             <span className="option-title">{opt.title}</span>
                             {!escalationTriggered && opt.recommended && <span className="option-badge">Recommended</span>}
@@ -660,10 +718,23 @@ function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered }) {
 
                 {showOutcome && (
                     <div className="outcome-actions">
-                        <button className="btn btn-success" onClick={() => onOutcome('success')} style={{ fontSize: '13px', padding: '8px 16px' }}>
+                        <button
+                            className="btn btn-success"
+                            onClick={() => {
+                                if (data.options?.length > 0 && selectedOption === null) {
+                                    return
+                                }
+                                const id =
+                                    selectedOption != null && data.options?.[selectedOption] != null
+                                        ? data.options[selectedOption].option_id
+                                        : null
+                                onOutcome('success', id)
+                            }}
+                            style={{ fontSize: '13px', padding: '8px 16px' }}
+                        >
                             ✅ Success
                         </button>
-                        <button className="btn btn-danger" onClick={() => onOutcome('failure')} style={{ fontSize: '13px', padding: '8px 16px' }}>
+                        <button className="btn btn-danger" onClick={() => onOutcome('failure', null)} style={{ fontSize: '13px', padding: '8px 16px' }}>
                             ❌ Failure
                         </button>
                     </div>
@@ -679,13 +750,18 @@ function Patterns({ data }) {
     return (
         <>
             <div className="message-label">Similar Past Incidents</div>
-            {data.map((p, i) => (
+                {data.map((p, i) => (
                 <div key={i} style={{ fontSize: '13px', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                     <span style={{ color: 'var(--text-bright)' }}>{p.title}</span>
                     <span style={{ color: 'var(--text-dim)', marginLeft: '8px' }}>
                         {Math.round(p.similarity_score * 100)}%
                     </span>
                     {p.must_escalate && <span style={{ color: 'var(--danger)', marginLeft: '8px' }}>⚠️ Must Escalate</span>}
+                    {p.decision_taken && (
+                        <div style={{ color: 'var(--text-dim)', marginTop: 4, fontSize: '12px', lineHeight: 1.45 }}>
+                            Prior decision: {p.decision_taken}
+                        </div>
+                    )}
                 </div>
             ))}
         </>

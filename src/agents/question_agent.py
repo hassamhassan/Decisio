@@ -39,6 +39,10 @@ from src.state.state import (
     DecisioState,
     Question,
 )
+from src.agents.prompt_context import format_qa_history_for_llm
+
+# Recent Q&A only in prompts; full qa_history stays in state for DB / dedup.
+QUESTION_AGENT_QA_PROMPT_WINDOW = 8
 
 
 # ── Deduplication ─────────────────────────────────────────────────────
@@ -328,14 +332,14 @@ def question_agent(state: DecisioState) -> DecisioState:
         f"You MUST generate a question specifically for this step.",
     ]
 
-    if qa_history:
-        context_parts.append("\n=== PREVIOUS Q&A (do not repeat these) ===")
-        for i, qa in enumerate(qa_history, 1):
-            step_info = f" [Step {qa.get('diagnostic_step', '?')}]" if qa.get("diagnostic_step") else ""
-            context_parts.append(
-                f"Q{i}{step_info}: {qa.get('question', 'N/A')}\n"
-                f"A{i}: <USER_INPUT>{qa.get('answer', 'N/A')}</USER_INPUT>"
-            )
+    qa_block = format_qa_history_for_llm(
+        qa_history,
+        max_exchanges=QUESTION_AGENT_QA_PROMPT_WINDOW,
+        heading="PREVIOUS Q&A (do not repeat these)",
+        mode="question_gen",
+    )
+    if qa_block:
+        context_parts.append("\n" + qa_block)
 
     facts = state.get("facts") or []
     if facts:

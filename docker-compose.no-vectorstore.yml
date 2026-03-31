@@ -1,6 +1,16 @@
-# Decisio — deploy WITHOUT vector store (PostgreSQL + API + frontend only)
-# Retrieval agent is disabled; the app uses LLM-only reasoning.
-# Usage: docker compose -f docker-compose.no-vectorstore.yml up -d
+# Decisio — PostgreSQL + Redis + Qdrant (Decision Memory) + API
+# (Former minimal stack; Qdrant is included for vector retrieval.)
+#
+# Usage:
+#   docker compose -f docker-compose.no-vectorstore.yml up -d
+#
+# Decision Memory:
+#   - API uses QDRANT_URL=http://qdrant:6333 (set below on `api`).
+#   - First incident resolution (success) seeds patterns; similar cases then retrieve from Qdrant.
+#   - To run API without loading embeddings/Qdrant: add to `api.environment`:
+#       DECISIO_DISABLE_RETRIEVAL: "1"
+#
+# Qdrant dashboard / REST: http://localhost:6333
 
 services:
   postgres:
@@ -23,6 +33,18 @@ services:
     container_name: decisio-redis
     restart: unless-stopped
 
+  qdrant:
+    image: qdrant/qdrant:v1.12.0
+    container_name: decisio-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    restart: unless-stopped
+
   api:
     build: .
     container_name: decisio-api
@@ -30,6 +52,7 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-decisio}}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
@@ -38,8 +61,10 @@ services:
     command: sh -c "alembic upgrade head && exec uvicorn api:app --host 0.0.0.0 --port 8000"
     depends_on:
       postgres: { condition: service_healthy }
+      qdrant: { condition: service_started }
       redis: { condition: service_started }
     restart: unless-stopped
 
 volumes:
   postgres_data:
+  qdrant_storage:

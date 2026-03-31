@@ -49,9 +49,18 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
     const [toast, setToast] = useState(null) // { message, key }
     const wsRef = useRef(null)
     const toastTimerRef = useRef(null)
+    const activeSessionRef = useRef(null)
+    useEffect(() => {
+        activeSessionRef.current = activeSession
+    }, [activeSession])
 
     const storedUser = getStoredUser()
     const isAdmin = user?.user_type === 'admin' || user?.user_type === 'super_admin'
+    const userLevel = (() => {
+        const t = (user?.user_type || storedUser?.user_type || '').trim()
+        const m = t.match(/^L(\d+)$/)
+        return m ? Number(m[1]) : null
+    })()
 
     const loadSessions = useCallback((isMounted = { current: true }) => {
         getEscalationSessions()
@@ -133,10 +142,26 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                 try {
                     const data = JSON.parse(evt.data)
                     if (data.type === 'new_escalation') {
+                        const msgLevel = data.required_level != null ? Number(data.required_level) : null
+                        if (!isAdmin && userLevel != null && msgLevel != null && msgLevel !== userLevel) {
+                            return
+                        }
                         loadSessions()
                         showToast('🔔 New escalation received!')
                     }
                     if (data.type === 'session_closed') {
+                        loadSessions()
+                    }
+                    if (data.type === 'session_claimed') {
+                        const msgLevel = data.required_level != null ? Number(data.required_level) : null
+                        if (!isAdmin && userLevel != null && msgLevel != null && msgLevel !== userLevel) {
+                            return
+                        }
+                        // Another expert opened the chat first and claimed the session.
+                        if (activeSessionRef.current?.session_id === data.session_id && data.expert_id !== storedUser?.id) {
+                            setActiveSession(null)
+                            setChatMinimized(false)
+                        }
                         loadSessions()
                     }
                     if (data.type === 'ping') {
@@ -183,7 +208,7 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                 <h1>⚙️ <span>Decisio</span></h1>
                 <div className="header-status">
                     <span style={{ color: '#06b6d4', fontWeight: 600 }}>
-                        🔧 Shift Manager Console
+                        🔧 {user?.escalation_level_name || 'Shift Manager Console'}
                     </span>
                     {waiting.length > 0 && (
                         <span className="status-chip" style={{ borderColor: '#f59e0b', color: '#f59e0b' }}>
@@ -392,6 +417,7 @@ function SessionCard({ session, isActive, onJoin, currentUserId }) {
                         className="btn"
                         onClick={onJoin}
                         style={{ fontSize: 13, padding: '7px 16px', whiteSpace: 'nowrap' }}
+                        disabled={isTakenByOther}
                     >
                         {isTakenByOther ? 'View (taken)' : 'Join Chat'}
                     </button>
