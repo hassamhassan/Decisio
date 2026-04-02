@@ -12,7 +12,7 @@ def seed_reports():
     with SessionLocal() as db:
         company = db.query(Company).first()
         if not company:
-            company = Company(name="Demo Manufacturing Inc", slug="demo")
+            company = Company(name="Demo Manufacturing Inc", )
             db.add(company)
             db.flush()
             print("Created default company: Demo Manufacturing Inc")

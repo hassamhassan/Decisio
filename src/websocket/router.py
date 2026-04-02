@@ -33,7 +33,7 @@ HEARTBEAT_INTERVAL = 30.0
 
 
 def _is_expert_user(user: TokenData) -> bool:
-    return is_escalation_type(user.user_type) or user.user_type == "admin"
+    return is_escalation_type(user.user_type)
 
 
 def _parse_user_level(user_type: str) -> int | None:
@@ -78,6 +78,10 @@ async def _get_session_and_validate(
 
         # Original reporter always admitted
         if esc.user_id == token_data.user_id:
+            return esc
+
+        # Admin observer path
+        if token_data.user_type == "admin":
             return esc
 
         # Expert path: allow any expert in the same company

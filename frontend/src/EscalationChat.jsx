@@ -9,10 +9,11 @@ import { getToken, getEscalationMessages, getWsBaseUrl } from './api'
  *   companyId  - tenant company id
  *   userId     - current user id
  *   userRole   - current user's role (user_type)
- *   onMinimize - optional callback when user minimizes the panel
- *   minimized  - whether panel is currently minimized
+ *   onMinimize      - optional callback when user minimizes the panel
+ *   minimized       - whether panel is currently minimized
+ *   onSessionClosed - optional callback when the escalation session is closed
  */
-export default function EscalationChat({ sessionId, companyId, userId, userRole, onMinimize, minimized }) {
+export default function EscalationChat({ sessionId, companyId, userId, userRole, onMinimize, minimized, onSessionClosed }) {
     const [messages, setMessages] = useState([])
     const [input, setInput] = useState('')
     const [status, setStatus] = useState('connecting') // connecting | connected | disconnected | closed
@@ -108,6 +109,10 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
                         message: 'Session has been closed by the shift manager.',
                         timestamp: data.timestamp,
                     }])
+                    // Notify parent so it can transition to decision brief / outcome buttons
+                    if (onSessionClosed) {
+                        setTimeout(() => onSessionClosed(), 1500)
+                    }
                     return
                 }
 

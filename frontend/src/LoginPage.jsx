@@ -17,11 +17,13 @@ export default function LoginPage({ onLogin }) {
     const [password, setPassword] = useState('')
     const [fullName, setFullName] = useState('')
     const [error, setError] = useState('')
+    const [passwordError, setPasswordError] = useState('')
     const [loading, setLoading] = useState(false)
 
     const handleSubmit = async (e) => {
         e.preventDefault()
         setError('')
+        setPasswordError('')
         setLoading(true)
 
         try {
@@ -36,7 +38,12 @@ export default function LoginPage({ onLogin }) {
             }
         } catch (err) {
             const msg = err?.message
-            setError(typeof msg === 'string' ? msg : 'Authentication failed')
+            const text = typeof msg === 'string' ? msg : 'Authentication failed'
+            if (mode === 'login' && /username or password incorrect/i.test(text)) {
+                setPasswordError('Username or password incorrect')
+            } else {
+                setError(text)
+            }
         } finally {
             setLoading(false)
         }
@@ -73,7 +80,7 @@ export default function LoginPage({ onLogin }) {
                             id="email"
                             type="email"
                             value={email}
-                            onChange={(e) => setEmail(e.target.value)}
+                            onChange={(e) => { setEmail(e.target.value); setError(''); setPasswordError('') }}
                             placeholder={mode === 'login' ? 'you@example.com' : 'admin@decisio.io'}
                             required
                             autoFocus
@@ -88,7 +95,7 @@ export default function LoginPage({ onLogin }) {
                                     id="username"
                                     type="text"
                                     value={username}
-                                    onChange={(e) => setUsername(e.target.value)}
+                                    onChange={(e) => { setUsername(e.target.value); setError(''); setPasswordError('') }}
                                     placeholder="admin"
                                     required
                                 />
@@ -99,7 +106,7 @@ export default function LoginPage({ onLogin }) {
                                     id="fullName"
                                     type="text"
                                     value={fullName}
-                                    onChange={(e) => setFullName(e.target.value)}
+                                    onChange={(e) => { setFullName(e.target.value); setError(''); setPasswordError('') }}
                                     placeholder="Admin User"
                                 />
                             </div>
@@ -112,10 +119,11 @@ export default function LoginPage({ onLogin }) {
                             id="password"
                             type="password"
                             value={password}
-                            onChange={(e) => setPassword(e.target.value)}
+                            onChange={(e) => { setPassword(e.target.value); setError(''); setPasswordError('') }}
                             placeholder="Enter password"
                             required
                         />
+                        {passwordError && <div className="login-error" style={{ marginTop: 8 }}>{passwordError}</div>}
                     </div>
 
                     {error && <div className="login-error">{error}</div>}

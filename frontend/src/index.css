@@ -344,7 +344,7 @@ body {
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(239, 68, 68, 0.1);
+  background: white;
   color: var(--danger);
 }
 
@@ -444,6 +444,119 @@ body {
   resize: none;
   min-height: 44px;
   max-height: 120px;
+}
+
+/* ── ChatGPT-style Input Bar ─────────────────────── */
+
+.gpt-input-wrapper {
+  padding: 8px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.gpt-input-pill {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  max-width: 720px;
+  width: 100%;
+  background: #ffffff;
+  border-radius: 26px;
+  padding: 6px 6px 6px 6px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.gpt-input-pill:focus-within {
+  border-color: rgba(0, 0, 0, 0.2);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
+}
+
+.gpt-input-field {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #1a1a1a;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  resize: none;
+  min-height: 24px;
+  max-height: 200px;
+  padding: 8px 4px 8px 4px;
+  overflow-y: auto;
+}
+
+.gpt-input-field::placeholder {
+  color: #9a9a9a;
+}
+
+.gpt-input-field:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.gpt-input-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #6b6b6b;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+}
+
+.gpt-input-icon:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #000;
+}
+
+.gpt-input-icon:active {
+  transform: scale(0.92);
+}
+
+.gpt-plus-btn {
+  margin-bottom: 0px;
+}
+
+.gpt-send-btn {
+  color: #6b6b6b;
+}
+
+.gpt-send-btn.has-text {
+  background: #000;
+  color: #fff;
+}
+
+.gpt-send-btn.has-text:hover {
+  background: #000;
+  color: #fff;
+}
+
+.gpt-send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.gpt-send-btn:disabled:hover {
+  background: transparent;
+  color: #6b6b6b;
+}
+
+.gpt-input-disclaimer {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #9a9a9a;
+  text-align: center;
+  letter-spacing: 0.01em;
 }
 
 .input-field:focus {

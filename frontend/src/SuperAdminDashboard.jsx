@@ -13,11 +13,12 @@ import {
     getStoredUser,
 } from './api'
 
-function Modal({ title, children, onClose }) {
+function Modal({ title, error, children, onClose }) {
     return (
         <div className="admin-modal-overlay" onClick={onClose}>
             <div className="admin-modal" onClick={e => e.stopPropagation()}>
                 <h3>{title}</h3>
+                {error && <div className="form-error" style={{ marginBottom: 16 }}>{error}</div>}
                 {children}
             </div>
         </div>
@@ -35,7 +36,7 @@ export default function SuperAdminDashboard() {
 
     // Create company modal
     const [showCreateCompany, setShowCreateCompany] = useState(false)
-    const [companyForm, setCompanyForm] = useState({ name: '', slug: '' })
+    const [companyForm, setCompanyForm] = useState({ name: '' })
 
     // Create admin modal
     const [showCreateAdmin, setShowCreateAdmin] = useState(false)
@@ -45,7 +46,7 @@ export default function SuperAdminDashboard() {
 
     // Edit company modal
     const [showEditCompany, setShowEditCompany] = useState(false)
-    const [editCompanyForm, setEditCompanyForm] = useState({ id: null, name: '', slug: '' })
+    const [editCompanyForm, setEditCompanyForm] = useState({ id: null, name: '' })
 
     // Edit admin modal
     const [showEditAdmin, setShowEditAdmin] = useState(false)
@@ -80,11 +81,10 @@ export default function SuperAdminDashboard() {
         e.preventDefault()
         setError('')
         setSuccess('')
-        const slug = companyForm.slug.trim() || companyForm.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
         try {
-            await superAdminCreateCompany(companyForm.name.trim(), slug)
+            await superAdminCreateCompany(companyForm.name.trim())
             setSuccess('Company created successfully.')
-            setCompanyForm({ name: '', slug: '' })
+            setCompanyForm({ name: '' })
             setShowCreateCompany(false)
             loadCompanies()
             setTimeout(() => setSuccess(''), 3000)
@@ -100,6 +100,16 @@ export default function SuperAdminDashboard() {
         const cid = parseInt(selectedCompanyId, 10)
         if (!cid) {
             setError('Select a company.')
+            return
+        }
+
+        const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+        if (!emailRegex.test(adminForm.email.trim())) {
+            setError('Email is not valid ')
+            return
+        }
+        if (adminForm.password.length < 8) {
+            setError('Password must have at least 8 characters')
             return
         }
         try {
@@ -166,7 +176,7 @@ export default function SuperAdminDashboard() {
     }
 
     const openEditCompany = (company) => {
-        setEditCompanyForm({ id: company.id, name: company.name, slug: company.slug })
+        setEditCompanyForm({ id: company.id, name: company.name })
         setShowEditCompany(true)
         setError('')
     }
@@ -175,9 +185,8 @@ export default function SuperAdminDashboard() {
         e.preventDefault()
         setError('')
         setSuccess('')
-        const slug = editCompanyForm.slug.trim() || editCompanyForm.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
         try {
-            await superAdminUpdateCompany(editCompanyForm.id, { name: editCompanyForm.name.trim(), slug })
+            await superAdminUpdateCompany(editCompanyForm.id, { name: editCompanyForm.name.trim() })
             setSuccess('Company updated.')
             setShowEditCompany(false)
             loadCompanies()
@@ -205,6 +214,17 @@ export default function SuperAdminDashboard() {
         setSuccess('')
         const payload = { email: editAdminForm.email.trim(), full_name: editAdminForm.full_name.trim() }
         const cid = parseInt(editAdminForm.company_id, 10)
+
+        const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+        if (!emailRegex.test(payload.email)) {
+            setError('Email is not valid')
+            return
+        }
+        if (editAdminForm.password && editAdminForm.password.length < 8) {
+            setError('Password must have at least 8 characters')
+            return
+        }
+
         if (cid) payload.company_id = cid
         if (editAdminForm.password) payload.password = editAdminForm.password
         try {
@@ -257,13 +277,13 @@ export default function SuperAdminDashboard() {
                         Create companies and assign an admin to each company. Company admins can then manage users, equipment, and settings for their tenant.
                     </p>
 
-                    {error && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
+                    {error && !showCreateCompany && !showCreateAdmin && !showEditCompany && !showEditAdmin && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
                     {success && <div className="form-success" style={{ marginBottom: 12, color: '#10b981', fontWeight: 600 }}>{success}</div>}
 
                     {/* Companies */}
                     <div className="admin-header-row">
                         <h3 className="admin-subtitle">Companies</h3>
-                        <button className="admin-btn primary" onClick={() => { setShowCreateCompany(true); setError(''); setCompanyForm({ name: '', slug: '' }) }}>
+                        <button className="admin-btn primary" onClick={() => { setShowCreateCompany(true); setError(''); setCompanyForm({ name: '' }) }}>
                             + Create Company
                         </button>
                     </div>
@@ -277,7 +297,7 @@ export default function SuperAdminDashboard() {
                                     <tr>
                                         <th>ID</th>
                                         <th>Name</th>
-                                        <th>Slug</th>
+                                        
                                         <th>Status</th>
                                         <th>Actions</th>
                                     </tr>
@@ -289,7 +309,7 @@ export default function SuperAdminDashboard() {
                                         <tr key={c.id}>
                                             <td className="td-mono">{c.id}</td>
                                             <td className="td-bold">{c.name}</td>
-                                            <td className="td-mono">{c.slug}</td>
+                                            
                                             <td><span className={`status-badge ${c.is_active ? 'active' : 'inactive'}`}>{c.is_active ? 'Active' : 'Inactive'}</span></td>
                                             <td>
                                                 <button type="button" className="admin-btn" style={{ padding: '4px 10px', fontSize: 12, marginRight: 6 }} onClick={() => openEditCompany(c)}>Edit</button>
@@ -356,7 +376,7 @@ export default function SuperAdminDashboard() {
                                             <td className="td-bold">{a.username}</td>
                                             <td>{a.email}</td>
                                             <td>{a.full_name || '—'}</td>
-                                            <td>{a.company_name} <span className="td-mono" style={{ fontSize: 12, color: '#94a3b8' }}>({a.company_slug})</span></td>
+                                            <td>{a.company_name}</td>
                                             <td><span className={`status-badge ${a.is_active ? 'active' : 'inactive'}`}>{a.is_active ? 'Active' : 'Inactive'}</span></td>
                                             <td>
                                                 {a.is_active && (
@@ -377,27 +397,20 @@ export default function SuperAdminDashboard() {
             </main>
 
             {showCreateCompany && (
-                <Modal title="Create Company" onClose={() => setShowCreateCompany(false)}>
+                <Modal title="Create Company" error={error} onClose={() => { setShowCreateCompany(false); setError(''); }}>
                     <form onSubmit={handleCreateCompany}>
                         <div className="form-group">
                             <label>Company Name</label>
                             <input
                                 value={companyForm.name}
                                 onChange={e => setCompanyForm({ ...companyForm, name: e.target.value })}
-                                placeholder="e.g. Acme Manufacturing"
+
                                 required
                             />
                         </div>
-                        <div className="form-group">
-                            <label>Slug (URL-friendly, optional)</label>
-                            <input
-                                value={companyForm.slug}
-                                onChange={e => setCompanyForm({ ...companyForm, slug: e.target.value })}
-                                placeholder="e.g. acme"
-                            />
-                        </div>
+
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => setShowCreateCompany(false)}>Cancel</button>
+                            <button type="button" className="admin-btn" onClick={() => { setShowCreateCompany(false); setError(''); }}>Cancel</button>
                             <button type="submit" className="admin-btn primary">Create Company</button>
                         </div>
                     </form>
@@ -405,7 +418,7 @@ export default function SuperAdminDashboard() {
             )}
 
             {showCreateAdmin && (
-                <Modal title="Create Admin for Company" onClose={() => setShowCreateAdmin(false)}>
+                <Modal title="Create Admin for Company" error={error} onClose={() => { setShowCreateAdmin(false); setError(''); }}>
                     <form onSubmit={handleCreateAdmin}>
                         <div className="form-group">
                             <label>Company (only companies without an admin)</label>
@@ -416,7 +429,7 @@ export default function SuperAdminDashboard() {
                             >
                                 <option value="">Select company...</option>
                                 {companies.filter(c => !admins.some(a => a.company_id === c.id)).map(c => (
-                                    <option key={c.id} value={c.id}>{c.name} ({c.slug})</option>
+                                    <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}
                             </select>
                             {companies.filter(c => !admins.some(a => a.company_id === c.id)).length === 0 && companies.length > 0 && (
@@ -428,7 +441,6 @@ export default function SuperAdminDashboard() {
                             <input
                                 value={adminForm.username}
                                 onChange={e => setAdminForm({ ...adminForm, username: e.target.value })}
-                                placeholder="e.g. admin@acme.com"
                                 required
                             />
                         </div>
@@ -448,7 +460,7 @@ export default function SuperAdminDashboard() {
                                 value={adminForm.password}
                                 onChange={e => setAdminForm({ ...adminForm, password: e.target.value })}
                                 required
-                                minLength={4}
+
                             />
                         </div>
                         <div className="form-group">
@@ -460,7 +472,7 @@ export default function SuperAdminDashboard() {
                             />
                         </div>
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => setShowCreateAdmin(false)}>Cancel</button>
+                            <button type="button" className="admin-btn" onClick={() => { setShowCreateAdmin(false); setError(''); }}>Cancel</button>
                             <button type="submit" className="admin-btn primary">Create Admin</button>
                         </div>
                     </form>
@@ -468,27 +480,19 @@ export default function SuperAdminDashboard() {
             )}
 
             {showEditCompany && (
-                <Modal title="Edit Company" onClose={() => setShowEditCompany(false)}>
+                <Modal title="Edit Company" error={error} onClose={() => { setShowEditCompany(false); setError(''); }}>
                     <form onSubmit={handleUpdateCompany}>
                         <div className="form-group">
                             <label>Company Name</label>
                             <input
                                 value={editCompanyForm.name}
                                 onChange={e => setEditCompanyForm({ ...editCompanyForm, name: e.target.value })}
-                                placeholder="e.g. Acme Manufacturing"
+
                                 required
                             />
                         </div>
-                        <div className="form-group">
-                            <label>Slug (URL-friendly)</label>
-                            <input
-                                value={editCompanyForm.slug}
-                                onChange={e => setEditCompanyForm({ ...editCompanyForm, slug: e.target.value })}
-                                placeholder="e.g. acme"
-                            />
-                        </div>
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => setShowEditCompany(false)}>Cancel</button>
+                            <button type="button" className="admin-btn" onClick={() => { setShowEditCompany(false); setError(''); }}>Cancel</button>
                             <button type="submit" className="admin-btn primary">Update Company</button>
                         </div>
                     </form>
@@ -496,7 +500,7 @@ export default function SuperAdminDashboard() {
             )}
 
             {showEditAdmin && (
-                <Modal title="Edit Admin" onClose={() => setShowEditAdmin(false)}>
+                <Modal title="Edit Admin" error={error} onClose={() => { setShowEditAdmin(false); setError(''); }}>
                     <form onSubmit={handleUpdateAdmin}>
                         <div className="form-group">
                             <label>Organization (Company)</label>
@@ -507,7 +511,7 @@ export default function SuperAdminDashboard() {
                             >
                                 <option value="">Select company...</option>
                                 {companies.map(c => (
-                                    <option key={c.id} value={c.id}>{c.name} ({c.slug})</option>
+                                    <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}
                             </select>
                         </div>
@@ -534,12 +538,11 @@ export default function SuperAdminDashboard() {
                                 type="password"
                                 value={editAdminForm.password}
                                 onChange={e => setEditAdminForm({ ...editAdminForm, password: e.target.value })}
-                                placeholder="Leave empty to keep"
-                                minLength={4}
+
                             />
                         </div>
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => setShowEditAdmin(false)}>Cancel</button>
+                            <button type="button" className="admin-btn" onClick={() => { setShowEditAdmin(false); setError(''); }}>Cancel</button>
                             <button type="submit" className="admin-btn primary">Update Admin</button>
                         </div>
                     </form>

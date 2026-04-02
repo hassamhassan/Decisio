@@ -219,7 +219,7 @@ export default function AdminPortal() {
         e.preventDefault()
         setPwError(''); setPwSuccess('')
         if (pwForm.new_pw !== pwForm.confirm) { setPwError('Passwords do not match'); return }
-        if (pwForm.new_pw.length < 4) { setPwError('Password must be at least 4 characters'); return }
+        if (pwForm.new_pw.length < 8) { setPwError('Password must have at least 8 characters'); return }
         try {
             await changePassword(pwForm.current, pwForm.new_pw)
             setPwSuccess('Password changed successfully!')
@@ -308,12 +308,11 @@ export default function AdminPortal() {
             </main>
 
             {showPwModal && (
-                <Modal title="Change Password" onClose={() => setShowPwModal(false)}>
+                <Modal title="Change Password" error={pwError} onClose={() => { setShowPwModal(false); setPwError(''); }}>
                     <form onSubmit={handlePwChange}>
                         <div className="form-group"><label>Current Password</label><input type="password" value={pwForm.current} onChange={e => setPwForm({ ...pwForm, current: e.target.value })} required /></div>
                         <div className="form-group"><label>New Password</label><input type="password" value={pwForm.new_pw} onChange={e => setPwForm({ ...pwForm, new_pw: e.target.value })} required /></div>
                         <div className="form-group"><label>Confirm New Password</label><input type="password" value={pwForm.confirm} onChange={e => setPwForm({ ...pwForm, confirm: e.target.value })} required /></div>
-                        {pwError && <div className="form-error">{pwError}</div>}
                         {pwSuccess && <div style={{ color: '#10b981', margin: '8px 0', fontWeight: 600 }}>{pwSuccess}</div>}
                         <div className="form-actions">
                             <button type="button" className="admin-btn" onClick={() => setShowPwModal(false)}>Cancel</button>
@@ -328,11 +327,12 @@ export default function AdminPortal() {
 
 // ── Reusable Modal ─────────────────────────────────────────────────
 
-function Modal({ title, children, onClose }) {
+function Modal({ title, error, children, onClose }) {
     return (
         <div className="admin-modal-overlay" onClick={onClose}>
             <div className="admin-modal" onClick={e => e.stopPropagation()}>
                 <h3>{title}</h3>
+                {error && <div className="form-error" style={{ marginBottom: 16 }}>{error}</div>}
                 {children}
             </div>
         </div>
@@ -480,6 +480,17 @@ function UsersSection() {
     const handleSubmit = async (e) => {
         e.preventDefault()
         setError('')
+
+        const emailRegex =/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+        if (form.email && !emailRegex.test(form.email.trim())) {
+            setError('Email is not valid  ')
+            return
+        }
+        if (form.password && form.password.length < 8) {
+            setError('Password must have at least 8 characters')
+            return
+        }
+
         try {
             if (editUser) {
                 const update = {}
@@ -517,7 +528,7 @@ function UsersSection() {
             </div>
 
             {showForm && (
-                <Modal title={editUser ? 'Edit User' : 'Create New User'} onClose={() => setShowForm(false)}>
+                <Modal title={editUser ? 'Edit User' : 'Create New User'} error={error} onClose={() => { setShowForm(false); setError(''); }}>
                     <form onSubmit={handleSubmit}>
                         {!editUser && <div className="form-group"><label>Username</label><input value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} required /></div>}
                         <div className="form-group"><label>Email</label><input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required={!editUser} /></div>
@@ -530,7 +541,6 @@ function UsersSection() {
                                 ))}
                             </select>
                         </div>
-                        {error && <div className="form-error">{error}</div>}
                         <div className="form-actions">
                             <button type="button" className="admin-btn" onClick={() => setShowForm(false)}>Cancel</button>
                             <button type="submit" className="admin-btn primary">{editUser ? 'Save' : 'Create'}</button>
@@ -827,7 +837,7 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
             </div>
 
             {showForm && (
-                <Modal title={editItem ? `Edit ${editItem.id}` : 'Add Equipment'} onClose={() => setShowForm(false)}>
+                <Modal title={editItem ? `Edit ${editItem.id}` : 'Add Equipment'} error={error} onClose={() => { setShowForm(false); setError(''); }}>
                     <form onSubmit={handleSubmit}>
                         {!editItem && <div className="form-group"><label>Equipment ID</label><input value={form.id} onChange={e => setForm({ ...form, id: e.target.value })} placeholder="e.g. CMP-02" required /></div>}
                         <div className="form-group"><label>Name</label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
@@ -852,7 +862,6 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
                             <div className="form-group"><label>Upstream ID</label><input value={form.upstream_id} onChange={e => setForm({ ...form, upstream_id: e.target.value })} placeholder="e.g. CMP-01" /></div>
                             <div className="form-group"><label>Downstream ID</label><input value={form.downstream_id} onChange={e => setForm({ ...form, downstream_id: e.target.value })} placeholder="e.g. CON-01" /></div>
                         </div>
-                        {error && <div className="form-error">{error}</div>}
                         <div className="form-actions">
                             <button type="button" className="admin-btn" onClick={() => setShowForm(false)}>Cancel</button>
                             <button type="submit" className="admin-btn primary">{editItem ? 'Save' : 'Add'}</button>
@@ -946,7 +955,7 @@ function SafetySection() {
             </div>
 
             {showForm && (
-                <Modal title={editItem ? `Edit Rule #${editItem.id}` : 'Add Safety Rule'} onClose={() => setShowForm(false)}>
+                <Modal title={editItem ? `Edit Rule #${editItem.id}` : 'Add Safety Rule'} error={error} onClose={() => { setShowForm(false); setError(''); }}>
                     <form onSubmit={handleSubmit}>
                         <div className="form-group"><label>Type</label>
                             <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} required>
@@ -956,7 +965,6 @@ function SafetySection() {
                             </select>
                         </div>
                         <div className="form-group"><label>Rule</label><input value={form.rule} onChange={e => setForm({ ...form, rule: e.target.value })} placeholder="Rule text" required /></div>
-                        {error && <div className="form-error">{error}</div>}
                         <div className="form-actions">
                             <button type="button" className="admin-btn" onClick={() => setShowForm(false)}>Cancel</button>
                             <button type="submit" className="admin-btn primary">{editItem ? 'Save' : 'Add'}</button>
@@ -1053,13 +1061,12 @@ function EscalationSection() {
                     </div>
 
                     {showLevelForm && (
-                        <Modal title={editLevel ? `Edit Level ${editLevel.level}` : 'Add Escalation Level'} onClose={() => setShowLevelForm(false)}>
+                        <Modal title={editLevel ? `Edit Level ${editLevel.level}` : 'Add Escalation Level'} error={error} onClose={() => { setShowLevelForm(false); setError(''); }}>
                             <form onSubmit={submitLevel}>
                                 {!editLevel && <div className="form-group"><label>Level Number</label><input type="number" value={levelForm.level} onChange={e => setLevelForm({ ...levelForm, level: parseInt(e.target.value) })} required /></div>}
                                 <div className="form-group"><label>Name</label><input value={levelForm.name} onChange={e => setLevelForm({ ...levelForm, name: e.target.value })} placeholder="e.g. Field Supervisor" required /></div>
                                 <div className="form-group"><label>Description</label><input value={levelForm.description} onChange={e => setLevelForm({ ...levelForm, description: e.target.value })} /></div>
-                                {error && <div className="form-error">{error}</div>}
-                                <div className="form-actions">
+                                        <div className="form-actions">
                                     <button type="button" className="admin-btn" onClick={() => setShowLevelForm(false)}>Cancel</button>
                                     <button type="submit" className="admin-btn primary">{editLevel ? 'Save' : 'Add'}</button>
                                 </div>
@@ -1092,7 +1099,7 @@ function EscalationSection() {
                     </div>
 
                     {showRuleForm && (
-                        <Modal title={editRule ? `Edit Rule #${editRule.id}` : 'Add Escalation Rule'} onClose={() => setShowRuleForm(false)}>
+                        <Modal title={editRule ? `Edit Rule #${editRule.id}` : 'Add Escalation Rule'} error={error} onClose={() => { setShowRuleForm(false); setError(''); }}>
                             <form onSubmit={submitRule}>
                                 <div className="form-group"><label>Condition</label><input value={ruleForm.condition} onChange={e => setRuleForm({ ...ruleForm, condition: e.target.value })} placeholder="e.g. high_risk_low_confidence" required /></div>
                                 <div className="form-row">
@@ -1115,8 +1122,7 @@ function EscalationSection() {
                                     </div>
                                 </div>
                                 <div className="form-group"><label>Description</label><input value={ruleForm.description} onChange={e => setRuleForm({ ...ruleForm, description: e.target.value })} /></div>
-                                {error && <div className="form-error">{error}</div>}
-                                <div className="form-actions">
+                                        <div className="form-actions">
                                     <button type="button" className="admin-btn" onClick={() => setShowRuleForm(false)}>Cancel</button>
                                     <button type="submit" className="admin-btn primary">{editRule ? 'Save' : 'Add'}</button>
                                 </div>
@@ -1298,7 +1304,7 @@ function LiveEscalationsSection() {
                                     <td>{s.expert_name || (s.expert_id ? `Expert #${s.expert_id}` : '—')}</td>
                                     <td><span style={{ color: statusColor(s.status), fontWeight: 600 }}>{s.status === 'waiting' ? '⏳ Waiting' : '🟢 Active'}</span></td>
                                     <td>{s.created_at ? new Date(s.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                                    <td><button className="admin-btn-sm primary" onClick={() => setActiveSession(s)}>Join Chat</button></td>
+                                    <td><button className="admin-btn-sm outline" onClick={() => setActiveSession(s)}>View Chat</button></td>
                                 </tr>
                             ))}
                         </tbody>

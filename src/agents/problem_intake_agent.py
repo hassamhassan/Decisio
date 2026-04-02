@@ -222,6 +222,40 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
     llm = get_llm(temperature=0.4)
     company_id = state.get("company_id")
 
+    try:
+        from src.db.sync_queries import fetch_all_equipment
+        eq_list = fetch_all_equipment(company_id=company_id)
+        if not eq_list:
+            if not state.get("no_equipment_notified"):
+                try:
+                    from src.db.session import SessionLocal
+                    from src.db.crud import create_admin_notification
+                    with SessionLocal() as db:
+                        create_admin_notification(
+                            db,
+                            company_id=company_id,
+                            notification_type="SYSTEM_ALERT",
+                            incident_id=None,
+                            title="No Equipment Registered",
+                            message="A user attempted to report an issue, but no equipment is configured for this company. Please add equipment via the Admin Portal to allow issue reporting.",
+                            metadata={"user_input": full_report}
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to create admin notification: {e}")
+
+            return {
+                "intake_phase": "symptoms",
+                "problem_description": "",
+                "machine_name": "",
+                "reported_symptoms": "",
+                "clarification_question": "⚠️ Your company currently has no registered equipment. I have notified the system administrator. Please wait until equipment is added before reporting an issue.",
+                "status": "CLARIFICATION_NEEDED",
+                "current_node": "problem_intake",
+                "no_equipment_notified": True,
+            }
+    except Exception as e:
+        logger.error(f"Failed equipment check in intake: {e}")
+
     # Only clarification turns — proper conversation memory
     qa_history: list[dict] = [
         qa for qa in (state.get("qa_history") or [])

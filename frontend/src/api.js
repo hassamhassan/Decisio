@@ -37,6 +37,19 @@ async function apiFetch(url, options = {}) {
     };
     const res = await fetch(url, { ...options, headers });
     if (res.status === 401) {
+        // Login/register can legitimately return 401 for wrong credentials;
+        // do not force a full-page redirect in that case.
+        const isAuthEndpoint =
+            url.includes('/auth/login') ||
+            url.includes('/auth/register') ||
+            url.includes('/auth/me') && !getToken();
+
+        if (isAuthEndpoint) {
+            // Prefer a clean, user-facing message.
+            throw new Error('Username or password incorrect');
+        }
+
+        // Otherwise, treat as session expiry for authenticated calls.
         removeToken();
         window.location.href = '/login';
         throw new Error('Session expired');
@@ -281,10 +294,10 @@ export async function superAdminListCompanies() {
     return apiFetch(`${API_BASE}/super-admin/companies`);
 }
 
-export async function superAdminCreateCompany(name, slug) {
+export async function superAdminCreateCompany(name) {
     return apiFetch(`${API_BASE}/super-admin/companies`, {
         method: 'POST',
-        body: JSON.stringify({ name, slug }),
+        body: JSON.stringify({ name }),
     });
 }
 

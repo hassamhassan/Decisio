@@ -64,13 +64,20 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
     const handleLoadIncident = async (incidentId) => {
         if (loading) return
         setLoading(true)
+        // Reset escalation chat state to prevent stale chat from previous incident
+        setEscalationSession(null)
+        setChatMinimized(true)
         try {
             const data = await getIncident(incidentId)
             setIncident(data)
 
             const msgs = []
             if (data.report) {
-                msgs.push({ id: Math.random(), type: 'user', content: data.report })
+                // Strip appended [User Clarification]: blocks — show only original report
+                const cleanReport = data.report.split('[User Clarification]:')[0].trim()
+                if (cleanReport) {
+                    msgs.push({ id: Math.random(), type: 'user', content: cleanReport })
+                }
             }
             if (data.incident_card) {
                 msgs.push({ id: Math.random(), type: 'system', content: { type: 'incident_card', data: data.incident_card } })
@@ -84,7 +91,9 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
             if (data.qa_history && data.qa_history.length > 0) {
                 data.qa_history.forEach(qa => {
                     msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: [{ category: qa.category || 'clarification', question: qa.question }] } })
-                    msgs.push({ id: Math.random(), type: 'user', content: qa.answer })
+                    if (qa.answer) {
+                        msgs.push({ id: Math.random(), type: 'user', content: qa.answer })
+                    }
                 })
             }
             if (data.decision_brief) {
@@ -95,9 +104,11 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                     msgs.push({ id: Math.random(), type: 'system', content: { type: 'escalation', data: data.escalation } })
                 }
                 msgs.push({ id: Math.random(), type: 'system', content: { type: 'brief', data: data.decision_brief, escalationTriggered: data.escalation_triggered } })
-            } else if (data.clarification_question) {
+            }
+            // Always show the pending clarification question (last LLM response) if present
+            if (data.clarification_question) {
                 msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: [{ category: 'clarification', question: data.clarification_question }] } })
-            } else if (data.questions && data.questions.length > 0 && data.status === 'OPEN') {
+            } else if (!data.decision_brief && data.questions && data.questions.length > 0 && !['CLOSED', 'SUCCESS'].includes(data.status)) {
                 msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: data.questions, step: data.current_diagnostic_step } })
             }
             if (data.outcome && data.outcome !== 'pending') {
@@ -106,7 +117,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
             setMessages(msgs)
 
-            if (data.status === 'CLOSED' || data.status === 'DONE') {
+            if (data.status === 'CLOSED' || data.status === 'SUCCESS') {
                 setPhase('closed')
                 setEscalationSession(null)
             } else if (data.escalation?.session_id) {
@@ -360,8 +371,8 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                         </button>
                     )}
                     <div className="header-user-area">
-                    {/* Live chat button — hide for resolved incidents */}
-                    {escalationSession?.session_id && incident?.status !== 'DONE' && incident?.status !== 'CLOSED' && (
+                        {/* Live chat button — hide for resolved incidents */}
+                        {escalationSession?.session_id && incident?.status !== 'SUCCESS' && incident?.status !== 'CLOSED' && (
                             <button
                                 className="btn btn-outline btn-sm"
                                 onClick={() => {
@@ -482,18 +493,34 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                             userRole={user?.user_type}
                             minimized={chatMinimized}
                             onMinimize={() => setChatMinimized(prev => !prev)}
+                            onSessionClosed={async () => {
+                                // After escalation chat closes, transition to outcome (success/fail buttons)
+                                // without showing the decision brief
+                                try {
+                                    const data = await getIncident(incident.incident_id)
+                                    setIncident(data)
+                                } catch (err) {
+                                    // ignore reload error
+                                }
+                                setPhase('outcome')
+                            }}
                         />
                     )}
 
-                    {/* Input Area */}
+                    {/* Input Area — ChatGPT-style pill bar */}
                     {phase !== 'closed' && phase !== 'escalation_chat' && (
-                        <div className="input-area">
-                            <form className="input-row" onSubmit={handleSubmit}>
+                        <div className="gpt-input-wrapper">
+                            <form className="gpt-input-pill" onSubmit={handleSubmit}>
                                 <textarea
                                     ref={inputRef}
-                                    className="input-field"
+                                    className="gpt-input-field"
                                     value={input}
-                                    onChange={(e) => setInput(e.target.value)}
+                                    onChange={(e) => {
+                                        setInput(e.target.value)
+                                        // Auto-resize
+                                        e.target.style.height = 'auto'
+                                        e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px'
+                                    }}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter' && !e.shiftKey) {
                                             e.preventDefault()
@@ -504,10 +531,20 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                     disabled={loading}
                                     rows={1}
                                 />
-                                <button className="btn" type="submit" disabled={loading || !input.trim()}>
-                                    Send
+                                <button
+                                    type="submit"
+                                    className={`gpt-input-icon gpt-send-btn ${input.trim() ? 'has-text' : ''}`}
+                                    disabled={loading || !input.trim()}
+                                    title="Send"
+                                >
+                                    {input.trim() ? (
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a1 1 0 0 1 .707.293l.003.003-7.5 7.5a1 1 0 0 1-1.414-1.414L10.586 3H4a1 1 0 0 1 0-2h8z" transform="rotate(0 12 12)" /><path d="M12 3.414l5.293 5.293a1 1 0 0 0 1.414-1.414l-6-6a1 1 0 0 0-1.414 0l-6 6a1 1 0 0 0 1.414 1.414L12 3.414z" /><path d="M11 21V4h2v17h-2z" /></svg>
+                                    ) : (
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
+                                    )}
                                 </button>
                             </form>
+                            <div className="gpt-input-disclaimer">Decisio can make mistakes. Verify important decisions.</div>
                         </div>
                     )}
                 </div>
@@ -750,7 +787,7 @@ function Patterns({ data }) {
     return (
         <>
             <div className="message-label">Similar Past Incidents</div>
-                {data.map((p, i) => (
+            {data.map((p, i) => (
                 <div key={i} style={{ fontSize: '13px', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                     <span style={{ color: 'var(--text-bright)' }}>{p.title}</span>
                     <span style={{ color: 'var(--text-dim)', marginLeft: '8px' }}>
