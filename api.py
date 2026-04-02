@@ -533,8 +533,8 @@ async def create_incident(req: CreateIncidentRequest,user: TokenData = Depends(r
         ic["reported_by"] = req.reported_by or user.username
         state["incident_card"] = ic
 
-    await _save_state(incident_id,state)
     await _ensure_escalation_session(state,user)
+    await _save_state(incident_id,state)
     return _state_to_response(state)
 
 
@@ -626,6 +626,8 @@ async def submit_answer(incident_id: str,req: AnswerRequest,user: TokenData = De
 
     state["_session_id"] = incident_id
 
+    await _ensure_escalation_session(state,user)
+
     # Persist state first so the incident row is guaranteed to exist in the DB
     # before we try to insert a child QA record.
     await _save_state(incident_id,state)
@@ -634,7 +636,6 @@ async def submit_answer(incident_id: str,req: AnswerRequest,user: TokenData = De
     # state["qa_history"] into QARecord (delta append). Do not call
     # add_qa_record here — it duplicated rows and risked deadlocks.
 
-    await _ensure_escalation_session(state,user)
     return _state_to_response(state)
 
 
@@ -656,8 +657,8 @@ async def generate_brief(incident_id: str,user: TokenData = Depends(require_auth
     except Exception as e:
         raise HTTPException(500,f"Brief generation error: {str(e)}")
 
-    await _save_state(incident_id,state)
     await _ensure_escalation_session(state,user)
+    await _save_state(incident_id,state)
     return _state_to_response(state)
 
 
@@ -759,13 +760,11 @@ async def submit_outcome(incident_id: str,req: OutcomeRequest,user: TokenData = 
             logger.error("Failed to update incident outcome in DB: %s",e,exc_info=True)
         state["status"] = "ESCALATED"
 
-    await _save_state(incident_id,state)
     # Only create escalation sessions when escalation is still required.
     if state.get("escalation_triggered"):
         await _ensure_escalation_session(state,user)
-    # Re-save after escalation session creation so session_id persists
-    if state.get("escalation_session_id"):
-        await _save_state(incident_id,state)
+
+    await _save_state(incident_id,state)
     return _state_to_response(state)
 
 
@@ -817,9 +816,9 @@ async def verify_resolution(incident_id: str,req: VerificationRequest,user: Toke
         state["escalation"] = None
         state["escalation_session_id"] = None
 
-    await _save_state(incident_id,state)
     if state.get("escalation_triggered"):
         await _ensure_escalation_session(state,user)
+    await _save_state(incident_id,state)
     return _state_to_response(state)
 
 
@@ -1123,15 +1122,19 @@ async def list_escalation_sessions(user: TokenData = Depends(require_auth)):
 
         if not is_expert:
             query = query.where(EscalationSession.user_id == user.user_id)
-        elif user_level is not None and user.user_type != "admin":
-            # Expert handler L1-L4: filter to their required level.
+        elif user.user_type != "admin":
             from sqlalchemy import or_ as sa_or
-            query = query.where(
-                sa_or(
-                    EscalationSession.required_level == user_level,
-                    EscalationSession.required_level.is_(None),
+            if user_level is not None:
+                # Expert handler L1-L4: filter to their required level.
+                query = query.where(
+                    sa_or(
+                        EscalationSession.required_level == user_level,
+                        EscalationSession.required_level.is_(None),
+                    )
                 )
-            )
+            else:
+                # Legacy expert without a level: only see sessions without a specific required level
+                query = query.where(EscalationSession.required_level.is_(None))
 
         result = await session.execute(query)
         sessions_list = result.scalars().all()

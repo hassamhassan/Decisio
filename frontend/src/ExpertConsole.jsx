@@ -143,8 +143,13 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                     const data = JSON.parse(evt.data)
                     if (data.type === 'new_escalation') {
                         const msgLevel = data.required_level != null ? Number(data.required_level) : null
-                        if (!isAdmin && userLevel != null && msgLevel != null && msgLevel !== userLevel) {
-                            return
+                        if (!isAdmin) {
+                            if (msgLevel != null) {
+                                // If message has a level, you must either match it, or if you're a legacy expert (userLevel == null), you ignore it
+                                if (userLevel == null || msgLevel !== userLevel) {
+                                    return
+                                }
+                            }
                         }
                         loadSessions()
                         showToast('🔔 New escalation received!')
@@ -154,8 +159,12 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                     }
                     if (data.type === 'session_claimed') {
                         const msgLevel = data.required_level != null ? Number(data.required_level) : null
-                        if (!isAdmin && userLevel != null && msgLevel != null && msgLevel !== userLevel) {
-                            return
+                        if (!isAdmin) {
+                            if (msgLevel != null) {
+                                if (userLevel == null || msgLevel !== userLevel) {
+                                    return
+                                }
+                            }
                         }
                         // Another expert opened the chat first and claimed the session.
                         if (activeSessionRef.current?.session_id === data.session_id && data.expert_id !== storedUser?.id) {

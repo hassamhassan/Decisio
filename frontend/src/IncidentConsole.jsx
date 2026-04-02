@@ -186,19 +186,22 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                     // Show status
                     addMessage('system', { type: 'status', data })
 
-                    if (data.escalation_triggered && data.decision_brief) {
-                        addMessage('system', { type: 'escalation_notice', message: '⏳ This incident requires immediate escalation. Connecting you with a specialist...' })
-                        if (data.escalation) {
-                            addMessage('system', { type: 'escalation', data: data.escalation })
-                            if (data.escalation.session_id) {
-                                setEscalationSession(data.escalation)
+                    if (data.escalation_triggered) {
+                        // Generate brief if escalation triggered early in intake
+                        addMessage('system', { type: 'escalation_notice', message: '⏳ Based on incident severity, this requires immediate escalation. Please wait...' })
+                        const briefData = await generateBrief(data.incident_id)
+                        setIncident(briefData)
+                        if (briefData.escalation) {
+                            addMessage('system', { type: 'escalation', data: briefData.escalation })
+                            if (briefData.escalation.session_id) {
+                                setEscalationSession(briefData.escalation)
                                 setChatMinimized(false)
                                 setPhase('escalation_chat')
                             }
                         }
                         addMessage('system', { type: 'escalation_notice', message: '✅ Escalation request sent. An expert will review your incident shortly.' })
-                        addMessage('system', { type: 'brief', data: data.decision_brief, escalationTriggered: true })
-                        if (!data.escalation?.session_id) {
+                        addMessage('system', { type: 'brief', data: briefData.decision_brief, escalationTriggered: true })
+                        if (!briefData.escalation?.session_id) {
                             // Fallback: no session yet, stay in outcome so user can still see brief
                             setPhase('outcome')
                         }
