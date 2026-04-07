@@ -11,7 +11,7 @@ import {
     superAdminActivateCompany,
     logout,
     getStoredUser,
-} from './api'
+} from '../services/api'
 
 function Modal({ title, error, children, onClose }) {
     return (
@@ -297,7 +297,7 @@ export default function SuperAdminDashboard() {
                                     <tr>
                                         <th>ID</th>
                                         <th>Name</th>
-                                        
+
                                         <th>Status</th>
                                         <th>Actions</th>
                                     </tr>
@@ -309,7 +309,7 @@ export default function SuperAdminDashboard() {
                                         <tr key={c.id}>
                                             <td className="td-mono">{c.id}</td>
                                             <td className="td-bold">{c.name}</td>
-                                            
+
                                             <td><span className={`status-badge ${c.is_active ? 'active' : 'inactive'}`}>{c.is_active ? 'Active' : 'Inactive'}</span></td>
                                             <td>
                                                 <button type="button" className="admin-btn" style={{ padding: '4px 10px', fontSize: 12, marginRight: 6 }} onClick={() => openEditCompany(c)}>Edit</button>

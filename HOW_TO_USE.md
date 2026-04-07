@@ -12,12 +12,12 @@ Decisio is entirely containerized. It uses PostgreSQL (relational data), Redis (
 
 ### Prerequisites
 1. Docker and Docker Compose installed.
-2. A **Groq API Key** for the LLM inference.
+2. An **OpenAI API Key** for the LLM inference.
 
 ### Steps
-1. Open the `.env` file and insert your Groq API key:
+1. Open the `.env` file and insert your OpenAI API key:
    ```env
-   GROQ_API_KEY=gsk_your_actual_key_here
+   OPENAI_API_KEY=sk-your_actual_key_here
    ```
 2. Start the entire system:
    ```bash

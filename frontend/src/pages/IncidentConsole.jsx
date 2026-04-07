@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { createIncident, submitAnswer, submitOutcome, generateBrief, logout, getStoredUser, listIncidents, getIncident } from './api'
-import EscalationChat from './EscalationChat'
+import { createIncident, submitAnswer, submitOutcome, generateBrief, logout, getStoredUser, listIncidents, getIncident } from '../services/api'
+import EscalationChat from '../components/EscalationChat'
 
 const CATEGORY_LABELS = {
     trigger: 'Trigger',
@@ -138,7 +138,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
         const raw = err?.message || String(err)
         if (raw.includes('NoneType') || raw.startsWith('Processing error:') || raw.includes('object has no attribute')) {
             console.error(context, raw)
-            addMessage('system', { type: 'error', message: 'Something went wrong on our side. Please try again or start a new incident.' })
+            addMessage('system', { type: 'error', message: 'Something went wrong. Please try again or start a new incident.' })
         } else {
             addMessage('system', { type: 'error', message: raw })
         }

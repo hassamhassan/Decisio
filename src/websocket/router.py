@@ -149,23 +149,25 @@ async def escalation_chat(websocket: WebSocket, company_id: int, session_id: str
     # EC8: Admin gets "admin" role, escalation-level users get "expert", others get "user"
     sender_role = "admin" if is_admin else ("expert" if is_expert else "user")
 
-    await ws_manager.connect(
-        company_id=company_id,
-        session_id=session_id,
-        websocket=websocket,
-        is_expert=is_expert or is_admin,  # track admin presence too
-        user_id=token_data.user_id,
-    )
-
-    # Notify everyone in the room that the expert has joined
-    if is_expert:
-        await ws_manager.broadcast(company_id, session_id, {
-            "type": "expert_joined",
-            "expert_id": token_data.user_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
-
+    heartbeat_task = None
+    receive_task = None
     try:
+        await ws_manager.connect(
+            company_id=company_id,
+            session_id=session_id,
+            websocket=websocket,
+            is_expert=is_expert or is_admin,  # track admin presence too
+            user_id=token_data.user_id,
+        )
+
+        # Notify everyone in the room that the expert has joined
+        if is_expert:
+            await ws_manager.broadcast(company_id, session_id, {
+                "type": "expert_joined",
+                "expert_id": token_data.user_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+
         heartbeat_task = asyncio.create_task(asyncio.sleep(HEARTBEAT_INTERVAL))
         receive_task = asyncio.create_task(websocket.receive_text())
         while True:
@@ -309,14 +311,15 @@ async def escalation_notifications(websocket: WebSocket, company_id: int):
 
     # EC9: track expert presence on notification channel
     _is_expert = is_escalation_type(token_data.user_type)
-    await ws_manager.notify_connect(
-        company_id, websocket,
-        is_expert=_is_expert, user_id=token_data.user_id,
-    )
 
     heartbeat_task = None
     receive_task = None
     try:
+        await ws_manager.notify_connect(
+            company_id, websocket,
+            is_expert=_is_expert, user_id=token_data.user_id,
+        )
+
         heartbeat_task = asyncio.create_task(asyncio.sleep(HEARTBEAT_INTERVAL))
         receive_task = asyncio.create_task(websocket.receive_text())
         while True:

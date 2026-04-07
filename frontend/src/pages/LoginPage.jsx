@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { login, register } from './api'
+import { login, register } from '../services/api'
 
 function getHomePath(user) {
     if (!user?.user_type) return '/'

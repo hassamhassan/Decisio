@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { getToken, getEscalationMessages, getWsBaseUrl } from './api'
+import { getToken, getEscalationMessages, getWsBaseUrl } from '../services/api'
 
 /**
  * EscalationChat — Real-time WebSocket chat panel for escalation sessions.
@@ -23,6 +23,7 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
     const chatEndRef = useRef(null)
     const reconnectTimer = useRef(null)
     const reconnectAttempts = useRef(0)
+    const isClosedIntentional = useRef(false)
     const MAX_RECONNECT = 5
 
     const isShiftManager = /^L\d+$/.test(userRole)
@@ -101,6 +102,7 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
                 }
 
                 if (data.type === 'session_closed') {
+                    isClosedIntentional.current = true;
                     setStatus('closed')
                     setMessages(prev => [...prev, {
                         id: `sys-${Date.now()}`,
@@ -143,6 +145,7 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
 
         ws.onclose = (e) => {
             wsRef.current = null
+            if (isClosedIntentional.current) return;
             if (e.code === 4001 || e.code === 4003) {
                 setStatus('disconnected')
                 setError(e.reason || 'Access denied')
@@ -170,6 +173,7 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
     useEffect(() => {
         connectWs()
         return () => {
+            isClosedIntentional.current = true;
             if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
             if (wsRef.current) {
                 wsRef.current.onclose = null
@@ -190,6 +194,7 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
 
     const closeSession = () => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            isClosedIntentional.current = true;
             wsRef.current.send(JSON.stringify({ type: 'close' }))
         }
     }

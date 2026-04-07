@@ -9,8 +9,8 @@ import {
     createEscalationRule, updateEscalationRule, deleteEscalationRule,
     changePassword, getKpiStats, getEscalationSessions,
     getAdminNotifications, markNotificationRead, markAllNotificationsRead,
-} from './api'
-import EscalationChat from './EscalationChat'
+} from '../services/api'
+import EscalationChat from '../components/EscalationChat'
 
 const SECTIONS = [
     { id: 'dashboard', label: '📊 Dashboard', icon: '📊' },
@@ -465,6 +465,7 @@ function UsersSection() {
     const [form, setForm] = useState({ username: '', email: '', password: '', full_name: '', user_type: 'viewer' })
     const [error, setError] = useState('')
     const [escalationLevels, setEscalationLevels] = useState([])
+    const [confirmAction, setConfirmAction] = useState(null)
 
     const loadUsers = () => {
         setLoading(true)
@@ -481,7 +482,7 @@ function UsersSection() {
         e.preventDefault()
         setError('')
 
-        const emailRegex =/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+        const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
         if (form.email && !emailRegex.test(form.email.trim())) {
             setError('Email is not valid  ')
             return
@@ -516,8 +517,26 @@ function UsersSection() {
     }
 
     const handleDelete = async (u) => {
-        if (!confirm(`Deactivate user "${u.username}"?`)) return
-        try { await deleteUser(u.id); loadUsers() } catch (err) { alert(err.message) }
+        setConfirmAction({ action: 'deactivate', user: u })
+    }
+
+    const handleActivate = async (u) => {
+        setConfirmAction({ action: 'activate', user: u })
+    }
+
+    const confirmExecute = async () => {
+        const { action, user } = confirmAction
+        try {
+            if (action === 'deactivate') {
+                await deleteUser(user.id)
+            } else if (action === 'activate') {
+                await updateUser(user.id, { is_active: true })
+            }
+            loadUsers()
+            setConfirmAction(null)
+        } catch (err) {
+            alert(err.message)
+        }
     }
 
     return (
@@ -549,6 +568,26 @@ function UsersSection() {
                 </Modal>
             )}
 
+            {confirmAction && (
+                <Modal title={confirmAction.action === 'activate' ? 'Activate User' : 'Deactivate User'} onClose={() => setConfirmAction(null)}>
+                    <div style={{ padding: '0 10px 10px 10px' }}>
+                        <p style={{ margin: '0 0 20px 0', fontSize: '15px' }}>
+                            Are you sure you want to {confirmAction.action} user <strong>{confirmAction.user.username}</strong>?
+                        </p>
+                        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                            <button className="admin-btn" onClick={() => setConfirmAction(null)}>Cancel</button>
+                            <button
+                                className={`admin-btn ${confirmAction.action === 'activate' ? 'success' : 'danger'}`}
+                                onClick={confirmExecute}
+                                style={confirmAction.action === 'activate' ? { background: '#10b981', color: 'white', border: 'none' } : {}}
+                            >
+                                {confirmAction.action === 'activate' ? 'Activate' : 'Deactivate'}
+                            </button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+
             {loading ? <div className="admin-loading">Loading users...</div> : (
                 <div className="admin-table-wrap">
                     <table className="admin-table">
@@ -564,7 +603,11 @@ function UsersSection() {
                                     <td>{new Date(u.created_at).toLocaleDateString()}</td>
                                     <td>
                                         <button className="admin-btn-sm" onClick={() => handleEdit(u)}>Edit</button>
-                                        {u.is_active && <button className="admin-btn-sm danger" onClick={() => handleDelete(u)}>Deactivate</button>}
+                                        {u.is_active ? (
+                                            <button className="admin-btn-sm danger" style={{ marginLeft: '6px' }} onClick={() => handleDelete(u)}>Deactivate</button>
+                                        ) : (
+                                            <button className="admin-btn-sm" style={{ marginLeft: '6px' }} onClick={() => handleActivate(u)}> Activate </button>
+                                        )}
                                     </td>
                                 </tr>
                             ))}
@@ -1066,7 +1109,7 @@ function EscalationSection() {
                                 {!editLevel && <div className="form-group"><label>Level Number</label><input type="number" value={levelForm.level} onChange={e => setLevelForm({ ...levelForm, level: parseInt(e.target.value) })} required /></div>}
                                 <div className="form-group"><label>Name</label><input value={levelForm.name} onChange={e => setLevelForm({ ...levelForm, name: e.target.value })} placeholder="e.g. Field Supervisor" required /></div>
                                 <div className="form-group"><label>Description</label><input value={levelForm.description} onChange={e => setLevelForm({ ...levelForm, description: e.target.value })} /></div>
-                                        <div className="form-actions">
+                                <div className="form-actions">
                                     <button type="button" className="admin-btn" onClick={() => setShowLevelForm(false)}>Cancel</button>
                                     <button type="submit" className="admin-btn primary">{editLevel ? 'Save' : 'Add'}</button>
                                 </div>
@@ -1122,7 +1165,7 @@ function EscalationSection() {
                                     </div>
                                 </div>
                                 <div className="form-group"><label>Description</label><input value={ruleForm.description} onChange={e => setRuleForm({ ...ruleForm, description: e.target.value })} /></div>
-                                        <div className="form-actions">
+                                <div className="form-actions">
                                     <button type="button" className="admin-btn" onClick={() => setShowRuleForm(false)}>Cancel</button>
                                     <button type="submit" className="admin-btn primary">{editRule ? 'Save' : 'Add'}</button>
                                 </div>

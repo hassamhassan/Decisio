@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { getToken, getStoredUser, removeToken } from './api'
-import LoginPage from './LoginPage'
-import AdminPortal from './AdminPortal'
-import IncidentConsole from './IncidentConsole'
-import ExpertConsole from './ExpertConsole'
-import SuperAdminDashboard from './SuperAdminDashboard'
+import { getToken, getStoredUser, removeToken } from './services/api'
+import LoginPage from './pages/LoginPage'
+import AdminPortal from './pages/AdminPortal'
+import IncidentConsole from './pages/IncidentConsole'
+import ExpertConsole from './pages/ExpertConsole'
+import SuperAdminDashboard from './pages/SuperAdminDashboard'
 
 const LEGACY_EXPERT_ROLES = ['expert', 'escalation_owner']
 function isEscalationType(t) { return (t && /^L\d+$/.test(t)) || LEGACY_EXPERT_ROLES.includes(t) }

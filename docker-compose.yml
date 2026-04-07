@@ -1,16 +1,3 @@
-# Decisio — PostgreSQL + Redis + Qdrant (Decision Memory) + API
-# (Former minimal stack; Qdrant is included for vector retrieval.)
-#
-# Usage:
-#   docker compose -f docker-compose.no-vectorstore.yml up -d
-#
-# Decision Memory:
-#   - API uses QDRANT_URL=http://qdrant:6333 (set below on `api`).
-#   - First incident resolution (success) seeds patterns; similar cases then retrieve from Qdrant.
-#   - To run API without loading embeddings/Qdrant: add to `api.environment`:
-#       DECISIO_DISABLE_RETRIEVAL: "1"
-#
-# Qdrant dashboard / REST: http://localhost:6333
 
 services:
   postgres:
@@ -53,8 +40,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-decisio}}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
       WS_BASE_URL: ${WS_BASE_URL:-http://localhost:8000}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}

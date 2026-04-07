@@ -183,7 +183,7 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
 
     context = "\n".join(context_parts)
 
-    llm = get_llm_for_brief(temperature=0.2)
+    llm = get_llm_for_brief(model="gpt-4", temperature=0.2)
     response = llm.invoke([
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=context),

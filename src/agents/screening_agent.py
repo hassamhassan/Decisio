@@ -105,7 +105,7 @@ def screening_agent(state: DecisioState) -> DecisioState:
 
     context = "\n".join(context_lines)
 
-    llm = get_llm(temperature=0.1)
+    llm = get_llm(model="gpt-4", temperature=0.1)
     response = llm.invoke([
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=context),

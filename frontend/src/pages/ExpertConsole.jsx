@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { getEscalationSessions, checkExpertsAvailable, getStoredUser, getToken, logout } from './api'
-import EscalationChat from './EscalationChat'
+import { getEscalationSessions, checkExpertsAvailable, getStoredUser, getToken, logout } from '../services/api'
+import EscalationChat from '../components/EscalationChat'
 
 // Fallback polling interval in case WS connection drops or misses an event
 const POLL_INTERVAL = 120_0000 // 15 seconds
@@ -115,6 +115,7 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
         let ws = null
         let reconnectTimer = null
         let attempt = 0;
+        let isCancelled = false;
 
         // Helper to fetch token, assuming getToken() might become async in the future
         const fetchFreshToken = async () => {
@@ -123,6 +124,7 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
 
         const connect = async () => {
             const token = await fetchFreshToken()
+            if (isCancelled) return;
             if (!token) {
                 // If no token, user is logged out or token expired and couldn't refresh.
                 // Attempt to reconnect after a delay, but don't proceed with WS connection.
@@ -193,6 +195,7 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
         connect()
 
         return () => {
+            isCancelled = true;
             if (reconnectTimer) clearTimeout(reconnectTimer)
             if (wsRef.current) {
                 wsRef.current.onclose = null // prevent reconnect on cleanup

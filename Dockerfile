@@ -47,7 +47,7 @@ USER app
 EXPOSE 8000
 
 ENV PYTHONUNBUFFERED=1
-# DATABASE_URL, GROQ_API_KEY, QDRANT_URL, JWT_SECRET_KEY set via docker-compose / env
+# DATABASE_URL, OPENAI_API_KEY, QDRANT_URL, JWT_SECRET_KEY set via docker-compose / env
 
 # Run migrations then start API
 CMD ["sh", "-c", "alembic upgrade head && exec uvicorn api:app --host 0.0.0.0 --port 8000"]

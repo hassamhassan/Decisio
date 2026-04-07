@@ -50,7 +50,7 @@ def incident_intake_agent(state: DecisioState) -> DecisioState:
     LangGraph node: Incident Intake Agent.
 
     Reads ``state["report"]`` and produces a structured Incident Card
-    by calling the Groq LLM.
+    by calling the OpenAI LLM.
 
     Returns
     -------

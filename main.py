@@ -211,7 +211,7 @@ def main():
             })
         except Exception as e:
             print(f"\n  ❌ Error: {e}")
-            print("     Make sure GROQ_API_KEY is set in .env")
+            print("     Make sure OPENAI_API_KEY is set in .env")
             continue
 
         # Display initial results

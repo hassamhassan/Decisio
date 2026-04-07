@@ -18,14 +18,13 @@ from src.state.state import DecisioState, RetrievedPattern
 
 logger = logging.getLogger(__name__)
 
-# Gemini embedding model. Must match Qdrant collection vector size.
+# OpenAI embedding model. Must match Qdrant collection vector size.
 # Override:
-# - DECISIO_EMBEDDING_MODEL=gemini-embedding-001
-# - DECISIO_EMBEDDING_DIMENSION=768
-EMBEDDING_MODEL = os.getenv("DECISIO_EMBEDDING_MODEL", "gemini-embedding-001")
-# Gemini `gemini-embedding-001` supports 128–3072 dims; recommended include 768.
-# We default to 768 to match the existing Qdrant collection in this repo.
-DEFAULT_EMBEDDING_DIMENSION = 768
+# - DECISIO_EMBEDDING_MODEL=text-embedding-3-small
+# - DECISIO_EMBEDDING_DIMENSION=1536
+EMBEDDING_MODEL = os.getenv("DECISIO_EMBEDDING_MODEL", "text-embedding-3-small")
+# `text-embedding-3-small` outputs 1536 dims.
+DEFAULT_EMBEDDING_DIMENSION = 1536
 _embedding_dimension = None
 
 _qdrant_client = None
@@ -119,7 +118,7 @@ def _get_embedding_dimension(*, existing_client=None) -> int:
 
 
 def _get_embedder():
-    """Lazy-load Gemini embeddings client."""
+    """Lazy-load OpenAI embeddings client."""
     global _embedder
     if not _retrieval_enabled():
         return None
@@ -127,35 +126,24 @@ def _get_embedder():
         return _embedder
 
     try:
-        from google import genai
-        from google.genai import types
+        from langchain_openai import OpenAIEmbeddings
 
-        api_key = (
-            os.getenv("GEMINI_API_KEY", "").strip()
-            or os.getenv("GOOGLE_API_KEY", "").strip()
-            or os.getenv("GENAI_API_KEY", "").strip()
-        )
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if not api_key:
-            raise RuntimeError("Missing GEMINI_API_KEY (or GOOGLE_API_KEY/GENAI_API_KEY)")
+            raise RuntimeError("Missing OPENAI_API_KEY")
 
-        class _GeminiEmbedder:
-            def __init__(self, *, key: str, model: str):
-                self._client = genai.Client(api_key=key)
-                self._model = model
+        class _LangChainEmbedderAdapter:
+            def __init__(self, key: str, model: str):
+                self._client = OpenAIEmbeddings(api_key=key, model=model)
 
             def encode(self, text: str):
                 t = (text or "").strip() or " "
-                t = t[:12_000]
-                dim = _get_embedding_dimension()
-                resp = self._client.models.embed_content(
-                    model=self._model,
-                    contents=t,
-                    config=types.EmbedContentConfig(output_dimensionality=dim),
-                )
-                return resp.embeddings[0].values
+                # text-embedding-3-small limit is ~8191 tokens
+                t = t[:32_000]
+                return self._client.embed_query(t)
 
-        _embedder = _GeminiEmbedder(key=api_key, model=EMBEDDING_MODEL)
-        logger.info("Loaded embedding model: %s (gemini)", EMBEDDING_MODEL)
+        _embedder = _LangChainEmbedderAdapter(key=api_key, model=EMBEDDING_MODEL)
+        logger.info("Loaded embedding model: %s (openai)", EMBEDDING_MODEL)
         return _embedder
     except Exception as e:
         logger.warning("Embedding model not available: %s. Retrieval disabled.", e)
