@@ -135,7 +135,15 @@ def screening_agent(state: DecisioState) -> DecisioState:
     # Update the incident card with screening results
     updated_card = dict(incident_card)
     updated_card["severity"] = screening.get("severity", "medium")
-    updated_card["safety_level"] = screening.get("safety_level", "unknown")
+    # Avoid leaving safety_level as "unknown" when screening didn't return a usable value.
+    # Heuristic fallback (conservative): high/critical → caution; otherwise → safe.
+    safety_level = (screening.get("safety_level") or "").strip().lower()
+    if safety_level not in ("safe", "caution", "danger", "unknown"):
+        safety_level = "unknown"
+    if safety_level == "unknown":
+        severity = (screening.get("severity") or updated_card.get("severity") or "medium").strip().lower()
+        safety_level = "caution" if severity in ("high", "critical") else "safe"
+    updated_card["safety_level"] = safety_level
     updated_card["impact"] = screening.get("impact", "")
     updated_card["scope"] = screening.get("scope", "localized")
     updated_card["initial_risk_score"] = float(screening.get("initial_risk_score", 5.0))
@@ -147,7 +155,7 @@ def screening_agent(state: DecisioState) -> DecisioState:
     # Check for immediate escalation
     escalation_triggered = False
     escalation_reasons = []
-    if screening.get("safety_level") == "danger":
+    if updated_card.get("safety_level") == "danger":
         escalation_reasons.append("Safety level: DANGER")
     if risk_score >= 8.0:
         escalation_reasons.append(f"Risk score {risk_score} exceeds threshold")

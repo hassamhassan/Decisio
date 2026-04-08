@@ -29,6 +29,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
     const chatRef = useRef(null)
     const inputRef = useRef(null)
     const outcomeSelectedOptionIdRef = useRef(null)
+    const canMarkSuccessFromChat = ['viewer', 'user', 'operator', 'engineer'].includes((user?.user_type || '').trim())
 
     const storedUser = getStoredUser()
 
@@ -334,6 +335,29 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
         }
     }
 
+    const handleChatSuccess = async () => {
+        if (loading) return
+        if (!incident?.incident_id) return
+        setLoading(true)
+        try {
+            addMessage('system', { type: 'status', data: { status: 'Saving success…' } })
+            const selectedOpt = outcomeSelectedOptionIdRef.current
+            const data = await submitOutcome(incident.incident_id, 'success', selectedOpt)
+            setIncident(data)
+            loadHistory()
+            addMessage('system', {
+                type: 'outcome_result',
+                data,
+            })
+            // Once success is recorded, backend closes the incident and writes to Decision Memory.
+            setPhase('closed')
+            setEscalationSession(null)
+        } catch (err) {
+            showError(err, 'Chat success:')
+        }
+        setLoading(false)
+    }
+
     const handleNewIncident = () => {
         setMessages([])
         setIncident(null)
@@ -489,25 +513,64 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
                     {/* Escalation Chat Panel (visible for viewer as well once escalation starts) */}
                     {escalationSession?.session_id && (
-                        <EscalationChat
-                            sessionId={escalationSession.session_id}
-                            companyId={storedUser?.company_id}
-                            userId={storedUser?.id}
-                            userRole={user?.user_type}
-                            minimized={chatMinimized}
-                            onMinimize={() => setChatMinimized(prev => !prev)}
-                            onSessionClosed={async () => {
-                                // After escalation chat closes, transition to outcome (success/fail buttons)
-                                // without showing the decision brief
-                                try {
-                                    const data = await getIncident(incident.incident_id)
-                                    setIncident(data)
-                                } catch (err) {
-                                    // ignore reload error
-                                }
-                                setPhase('outcome')
-                            }}
-                        />
+                        <div style={{ position: 'relative' }}>
+                            <EscalationChat
+                                sessionId={escalationSession.session_id}
+                                companyId={storedUser?.company_id}
+                                userId={storedUser?.id}
+                                userRole={user?.user_type}
+                                minimized={chatMinimized}
+                                onMinimize={() => setChatMinimized(prev => !prev)}
+                                onSessionClosed={async () => {
+                                    // After escalation chat closes, transition to outcome (success/fail buttons)
+                                    // without showing the decision brief
+                                    try {
+                                        const data = await getIncident(incident.incident_id)
+                                        setIncident(data)
+                                    } catch (err) {
+                                        // ignore reload error
+                                    }
+                                    setPhase('outcome')
+                                }}
+                            />
+
+                            {/* User/viewer controls: mark incident as success and store to Decision Memory */}
+                            {phase === 'escalation_chat' && !chatMinimized && canMarkSuccessFromChat && (
+                                <div style={{
+                                    display: 'flex',
+                                    gap: 10,
+                                    alignItems: 'center',
+                                    padding: '10px 12px',
+                                    borderTop: '1px solid rgba(255,255,255,0.08)',
+                                    background: 'rgba(0,0,0,0.15)',
+                                }}>
+                                    <button
+                                        className="btn btn-sm"
+                                        onClick={handleChatSuccess}
+                                        disabled={loading}
+                                        style={{
+                                            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                            color: '#fff',
+                                            border: 'none',
+                                        }}
+                                        title="Mark as resolved and store the pattern"
+                                    >
+                                        ✅ Success
+                                    </button>
+                                    <button
+                                        className="btn btn-sm btn-outline"
+                                        onClick={() => setChatMinimized(true)}
+                                        disabled={loading}
+                                        title="Hide chat panel"
+                                    >
+                                        ✕ End chat
+                                    </button>
+                                    <span style={{ fontSize: 12, opacity: 0.8 }}>
+                                        Success will save the resolution and write it to Decision Memory.
+                                    </span>
+                                </div>
+                            )}
+                        </div>
                     )}
 
                     {/* Input Area — ChatGPT-style pill bar */}

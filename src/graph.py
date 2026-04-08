@@ -10,6 +10,8 @@ from src.agents.question_agent import question_agent
 from src.agents.answer_interpreter_agent import answer_interpreter_agent
 from src.agents.hypothesis_agent import hypothesis_update_agent
 from src.agents.safety_agent import safety_constraint_agent
+from src.agents.post_answer_parallel_agent import post_answer_parallel_agent
+from src.agents.post_intake_parallel_agent import post_intake_parallel_agent
 from src.agents.decision_brief_agent import decision_brief_agent
 from src.agents.escalation_agent import escalation_agent
 from src.agents.outcome_capture_agent import outcome_capture_agent
@@ -148,10 +150,12 @@ def build_graph() -> StateGraph:
     graph.add_node("problem_intake", problem_intake_agent)
     graph.add_node("incident_intake", incident_intake_agent)
     graph.add_node("screening", screening_agent)
+    # Parallel: screening + early retrieval (incident_card-only).
+    graph.add_node("post_intake_parallel", post_intake_parallel_agent)
     graph.add_node("question_generation", question_agent)
     graph.add_node("answer_interpreter", answer_interpreter_agent)
-    graph.add_node("hypothesis_update", hypothesis_update_agent)
-    graph.add_node("safety_constraint", safety_constraint_agent)
+    # Parallelize expensive post-answer work to reduce latency.
+    graph.add_node("post_answer_parallel", post_answer_parallel_agent)
     graph.add_node("advance_step", advance_diagnostic_step)
     graph.add_node("decision_brief", decision_brief_agent)
     # Retrieval once Q&A context exists, immediately before decision brief
@@ -175,11 +179,11 @@ def build_graph() -> StateGraph:
             "end": END,
         },
     )
-    graph.add_edge("incident_intake", "screening")
+    graph.add_edge("incident_intake", "post_intake_parallel")
 
     # ── After screening: escalate or continue ────────────────────────
     graph.add_conditional_edges(
-        "screening",
+        "post_intake_parallel",
         post_screening_router,
         {
             "question_generation": "question_generation",
@@ -191,9 +195,8 @@ def build_graph() -> StateGraph:
     graph.add_edge("question_generation", END)
 
     # ── Answer processing pipeline ───────────────────────────────────
-    graph.add_edge("answer_interpreter", "hypothesis_update")
-    graph.add_edge("hypothesis_update", "safety_constraint")
-    graph.add_edge("safety_constraint", "advance_step")
+    graph.add_edge("answer_interpreter", "post_answer_parallel")
+    graph.add_edge("post_answer_parallel", "advance_step")
 
     # ── After advancing: route to continue or generate brief ─────────
     graph.add_conditional_edges(
@@ -201,8 +204,6 @@ def build_graph() -> StateGraph:
         diagnosis_router,
         {
             "question_generation": "question_generation",
-            # When diagnosis is ready for a brief, first refresh patterns
-            # with a retrieval pass that sees the full Q&A context.
             "decision_brief": "post_qa_retrieval",
             "escalation": "escalation",
         },
@@ -248,8 +249,7 @@ def build_answer_graph() -> StateGraph:
     graph = StateGraph(DecisioState)
 
     graph.add_node("answer_interpreter", answer_interpreter_agent)
-    graph.add_node("hypothesis_update", hypothesis_update_agent)
-    graph.add_node("safety_constraint", safety_constraint_agent)
+    graph.add_node("post_answer_parallel", post_answer_parallel_agent)
     graph.add_node("advance_step", advance_diagnostic_step)
     graph.add_node("question_generation", question_agent)
     graph.add_node("decision_brief", decision_brief_agent)
@@ -258,9 +258,8 @@ def build_answer_graph() -> StateGraph:
     graph.add_node("post_qa_retrieval", retrieval_agent)
 
     graph.set_entry_point("answer_interpreter")
-    graph.add_edge("answer_interpreter", "hypothesis_update")
-    graph.add_edge("hypothesis_update", "safety_constraint")
-    graph.add_edge("safety_constraint", "advance_step")
+    graph.add_edge("answer_interpreter", "post_answer_parallel")
+    graph.add_edge("post_answer_parallel", "advance_step")
 
     graph.add_conditional_edges(
         "advance_step",

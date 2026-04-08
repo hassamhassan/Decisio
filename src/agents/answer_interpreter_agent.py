@@ -85,7 +85,8 @@ def answer_interpreter_agent(state: DecisioState) -> DecisioState:
 
     if existing_facts:
         context_parts.append("\n=== PREVIOUSLY KNOWN FACTS ===")
-        for f in existing_facts:
+        # Cap to keep prompts small and fast.
+        for f in existing_facts[-18:]:
             context_parts.append(f"- {f.get('key', '?')}: {f.get('value', '?')}")
 
     context = "\n".join(context_parts)

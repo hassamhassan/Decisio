@@ -219,7 +219,7 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
     if state.get("intake_phase") == "complete":
         return {"intake_phase": "complete", "current_node": "problem_intake"}
 
-    llm = get_llm(temperature=0.4)
+    llm = get_llm(model="gpt-4o",temperature=0.4)
     company_id = state.get("company_id")
 
     try:

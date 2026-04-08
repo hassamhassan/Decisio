@@ -64,8 +64,6 @@ async def test_assign_available_expert_with_online_expert_assigns():
     session = AsyncMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=esc)
     session.flush = AsyncMock()
-    # Mock DB query result for `result.scalar_one_or_none()`
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=100)))
 
     svc = EscalationService(session)
     result = await svc.assign_available_expert(

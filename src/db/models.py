@@ -37,6 +37,7 @@ class Company(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(128), unique=True, nullable=False)
+    slug = Column(String(64), unique=True, nullable=False, index=True)
     is_active = Column(Boolean, default=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
