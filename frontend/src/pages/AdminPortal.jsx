@@ -1318,6 +1318,9 @@ function LiveEscalationsSection() {
                         userId={user?.id}
                         userRole={user?.user_type}
                         userName={user?.full_name || user?.username}
+                        embedded={true}
+                        minimized={false}
+                        onMinimize={() => {}}
                     />
                 </div>
             </div>

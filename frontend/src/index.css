@@ -1915,6 +1915,19 @@ body {
   animation: slideInChat 0.3s ease-out;
 }
 
+.escalation-chat.escalation-chat-embedded {
+  position: relative;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  width: 100%;
+  height: 100%;
+  border-left: none;
+  box-shadow: none;
+  z-index: auto;
+  animation: none;
+}
+
 @keyframes slideInChat {
   from {
     transform: translateX(100%);

@@ -13,7 +13,16 @@ import { getToken, getEscalationMessages, getWsBaseUrl } from '../services/api'
  *   minimized       - whether panel is currently minimized
  *   onSessionClosed - optional callback when the escalation session is closed
  */
-export default function EscalationChat({ sessionId, companyId, userId, userRole, onMinimize, minimized, onSessionClosed }) {
+export default function EscalationChat({
+    sessionId,
+    companyId,
+    userId,
+    userRole,
+    onMinimize,
+    minimized,
+    onSessionClosed,
+    embedded = false,
+}) {
     const [messages, setMessages] = useState([])
     const [input, setInput] = useState('')
     const [status, setStatus] = useState('connecting') // connecting | connected | disconnected | closed
@@ -27,8 +36,10 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
     const MAX_RECONNECT = 5
 
     const isShiftManager = /^L\d+$/.test(userRole)
-    const isExpert = isShiftManager || userRole === 'expert' || userRole === 'escalation_owner' || userRole === 'admin'
-    const canEndSession = !isShiftManager && (userRole === 'escalation_owner' || userRole === 'admin' || userRole === 'super_admin')
+    const isAdmin = userRole === 'admin' || userRole === 'super_admin'
+    const isExpert = isShiftManager || userRole === 'expert' || userRole === 'escalation_owner' || isAdmin
+    // Admins are view-only. Only escalation_owner can end via UI.
+    const canEndSession = !isShiftManager && userRole === 'escalation_owner'
 
     // Scroll to bottom when new messages arrive
     useEffect(() => {
@@ -214,7 +225,7 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
             : status === 'closed' ? 'danger'
                 : 'danger'
 
-    if (minimized) {
+    if (!embedded && minimized) {
         return (
             <div className="escalation-chat-minimized" onClick={onMinimize}>
                 <span className={`status-dot ${statusDot}`}></span>
@@ -225,7 +236,7 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
     }
 
     return (
-        <div className="escalation-chat">
+        <div className={`escalation-chat ${embedded ? 'escalation-chat-embedded' : ''}`}>
             {/* Header */}
             <div className="chat-header">
                 <div className="chat-header-left">
@@ -244,9 +255,11 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
                             ✕ End
                         </button>
                     )}
-                    <button className="btn btn-sm btn-outline" onClick={onMinimize} title="Minimize">
-                        ─
-                    </button>
+                    {!embedded && (
+                        <button className="btn btn-sm btn-outline" onClick={onMinimize} title="Minimize">
+                            ─
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -265,7 +278,9 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
                 )}
                 {messages.length === 0 && status === 'connected' && isExpert && (
                     <div className="chat-empty">
-                        You have joined the escalation. Send a message to start helping the operator.
+                        {isAdmin
+                            ? 'View-only: you can review escalation messages here.'
+                            : 'You have joined the escalation. Send a message to start helping the operator.'}
                     </div>
                 )}
 
@@ -307,12 +322,12 @@ export default function EscalationChat({ sessionId, companyId, userId, userRole,
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         placeholder={status === 'connected' ? 'Type a message...' : 'Waiting for connection...'}
-                        disabled={status !== 'connected'}
+                        disabled={status !== 'connected' || isAdmin}
                     />
                     <button
                         type="submit"
                         className="btn chat-send-btn"
-                        disabled={status !== 'connected' || !input.trim()}
+                        disabled={status !== 'connected' || isAdmin || !input.trim()}
                     >
                         Send
                     </button>

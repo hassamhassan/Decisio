@@ -732,6 +732,43 @@ async def submit_outcome(incident_id: str,req: OutcomeRequest,user: TokenData = 
             )
 
     if outcome == "success":
+        # If an escalation chat session exists for this incident, close it now.
+        # Success resolution should automatically end escalation so experts stop seeing it.
+        esc_sid = (
+            state.get("escalation_session_id")
+            or (state.get("escalation") or {}).get("session_id")
+        )
+        if esc_sid and user.company_id is not None:
+            try:
+                esc_uuid = uuid.UUID(str(esc_sid))
+            except Exception:
+                esc_uuid = None
+            if esc_uuid is not None:
+                try:
+                    async with get_session() as session:
+                        svc = EscalationService(session)
+                        await svc.close_session(esc_uuid, user.company_id)
+                    # Notify chat participants + expert consoles.
+                    try:
+                        await ws_manager.broadcast(user.company_id, str(esc_uuid), {
+                            "type": "session_closed",
+                            "closed_by": user.user_id,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                    except Exception:
+                        pass
+                    try:
+                        await ws_manager.notify_company(user.company_id, {
+                            "type": "session_closed",
+                            "session_id": str(esc_uuid),
+                            "closed_by": user.user_id,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.warning("Failed to auto-close escalation session on success: %s", e, exc_info=True)
+
         # Write to memory
         try:
             mem_update = memory_write_agent(state)
