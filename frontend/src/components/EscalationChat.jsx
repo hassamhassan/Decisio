@@ -314,7 +314,7 @@ export default function EscalationChat({
             </div>
 
             {/* Input */}
-            {status !== 'closed' && (
+            {status !== 'closed' && !isAdmin && (
                 <form className="chat-input-area" onSubmit={sendMessage}>
                     <input
                         type="text"
@@ -322,12 +322,12 @@ export default function EscalationChat({
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         placeholder={status === 'connected' ? 'Type a message...' : 'Waiting for connection...'}
-                        disabled={status !== 'connected' || isAdmin}
+                        disabled={status !== 'connected'}
                     />
                     <button
                         type="submit"
                         className="btn chat-send-btn"
-                        disabled={status !== 'connected' || isAdmin || !input.trim()}
+                        disabled={status !== 'connected' || !input.trim()}
                     >
                         Send
                     </button>
