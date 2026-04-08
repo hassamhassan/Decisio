@@ -141,7 +141,9 @@ def memory_write_agent(state: DecisioState) -> DecisioState:
                 f"Root cause: {root_cause or 'n/a'}. "
                 f"Signals: {', '.join(pattern['signals'][:5])}"
             )
-            vector = embedder.encode(text).tolist()
+            vec = embedder.encode(text)
+            # Some embedders return a Python list; others return numpy-like arrays.
+            vector = vec.tolist() if hasattr(vec, "tolist") else list(vec)
 
             point = PointStruct(
                 id=str(uuid.uuid4()),
