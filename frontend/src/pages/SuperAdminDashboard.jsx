@@ -12,6 +12,8 @@ import {
     logout,
     getStoredUser,
 } from '../services/api'
+import LanguageToggle from '../components/LanguageToggle'
+import { useI18n } from '../i18n'
 
 function Modal({ title, error, children, onClose }) {
     return (
@@ -26,6 +28,7 @@ function Modal({ title, error, children, onClose }) {
 }
 
 export default function SuperAdminDashboard() {
+    const { dir, lang, t, toggleLang } = useI18n()
     const user = getStoredUser()
     const [companies, setCompanies] = useState([])
     const [admins, setAdmins] = useState([])
@@ -83,7 +86,7 @@ export default function SuperAdminDashboard() {
         setSuccess('')
         try {
             await superAdminCreateCompany(companyForm.name.trim())
-            setSuccess('Company created successfully.')
+            setSuccess(t('superAdmin.messages.companyCreated'))
             setCompanyForm({ name: '' })
             setShowCreateCompany(false)
             loadCompanies()
@@ -99,17 +102,17 @@ export default function SuperAdminDashboard() {
         setSuccess('')
         const cid = parseInt(selectedCompanyId, 10)
         if (!cid) {
-            setError('Select a company.')
+            setError(t('superAdmin.messages.selectCompany'))
             return
         }
 
         const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
         if (!emailRegex.test(adminForm.email.trim())) {
-            setError('Email is not valid ')
+            setError(t('superAdmin.messages.invalidEmail'))
             return
         }
         if (adminForm.password.length < 8) {
-            setError('Password must have at least 8 characters')
+            setError(t('superAdmin.messages.passwordMinLength'))
             return
         }
         try {
@@ -119,7 +122,7 @@ export default function SuperAdminDashboard() {
                 password: adminForm.password,
                 full_name: adminForm.full_name.trim(),
             })
-            setSuccess(`Admin created for company.`)
+            setSuccess(t('superAdmin.messages.adminCreated'))
             setAdminForm({ username: '', email: '', password: '', full_name: '' })
             setSelectedCompanyId('')
             setShowCreateAdmin(false)
@@ -131,12 +134,12 @@ export default function SuperAdminDashboard() {
     }
 
     const handleDeleteAdmin = async (admin) => {
-        if (!confirm(`Remove admin "${admin.username}"? This will DELETE the admin user and deactivate all other users in company "${admin.company_name}". Assign a new admin to the company to reactivate users.`)) return
+        if (!confirm(t('superAdmin.confirm.removeAdmin', { username: admin.username, company: admin.company_name }))) return
         setError('')
         setSuccess('')
         try {
             await superAdminDeactivateAdmin(admin.id)
-            setSuccess('Admin removed and other company users deactivated.')
+            setSuccess(t('superAdmin.messages.adminRemoved'))
             loadAdmins()
             loadCompanies()
             setTimeout(() => setSuccess(''), 3000)
@@ -146,12 +149,12 @@ export default function SuperAdminDashboard() {
     }
 
     const handleDeactivateCompany = async (company) => {
-        if (!confirm(`Deactivate company "${company.name}" and all its users?`)) return
+        if (!confirm(t('superAdmin.confirm.deactivateCompany', { name: company.name }))) return
         setError('')
         setSuccess('')
         try {
             await superAdminDeactivateCompany(company.id)
-            setSuccess('Company and all its users deactivated.')
+            setSuccess(t('superAdmin.messages.companyDeactivated'))
             loadCompanies()
             loadAdmins()
             setTimeout(() => setSuccess(''), 3000)
@@ -161,12 +164,12 @@ export default function SuperAdminDashboard() {
     }
 
     const handleActivateCompany = async (company) => {
-        if (!confirm(`Activate company "${company.name}" and all its users?`)) return
+        if (!confirm(t('superAdmin.confirm.activateCompany', { name: company.name }))) return
         setError('')
         setSuccess('')
         try {
             await superAdminActivateCompany(company.id)
-            setSuccess('Company and all its users activated.')
+            setSuccess(t('superAdmin.messages.companyActivated'))
             loadCompanies()
             loadAdmins()
             setTimeout(() => setSuccess(''), 3000)
@@ -187,7 +190,7 @@ export default function SuperAdminDashboard() {
         setSuccess('')
         try {
             await superAdminUpdateCompany(editCompanyForm.id, { name: editCompanyForm.name.trim() })
-            setSuccess('Company updated.')
+            setSuccess(t('superAdmin.messages.companyUpdated'))
             setShowEditCompany(false)
             loadCompanies()
             setTimeout(() => setSuccess(''), 3000)
@@ -217,11 +220,11 @@ export default function SuperAdminDashboard() {
 
         const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
         if (!emailRegex.test(payload.email)) {
-            setError('Email is not valid')
+            setError(t('superAdmin.messages.invalidEmail'))
             return
         }
         if (editAdminForm.password && editAdminForm.password.length < 8) {
-            setError('Password must have at least 8 characters')
+            setError(t('superAdmin.messages.passwordMinLength'))
             return
         }
 
@@ -229,7 +232,7 @@ export default function SuperAdminDashboard() {
         if (editAdminForm.password) payload.password = editAdminForm.password
         try {
             await superAdminUpdateAdmin(editAdminForm.id, payload)
-            setSuccess('Admin updated.')
+            setSuccess(t('superAdmin.messages.adminUpdated'))
             setEditAdminForm({ id: null, company_id: '', email: '', full_name: '', password: '' })
             setShowEditAdmin(false)
             loadAdmins()
@@ -240,41 +243,44 @@ export default function SuperAdminDashboard() {
     }
 
     return (
-        <div className={`admin-layout ${sidebarOpen ? 'admin-sidebar-open' : ''}`}>
+        <div className={`admin-layout ${sidebarOpen ? 'admin-sidebar-open' : ''}`} dir={dir}>
             <div className="admin-sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
             <header className="admin-mobile-header">
                 <h2>🔐 Decisio</h2>
-                <button type="button" className="admin-sidebar-toggle" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
+                <button type="button" className="admin-sidebar-toggle" onClick={() => setSidebarOpen(true)} aria-label={t('superAdmin.sidebar.openMenu')}>☰</button>
             </header>
             <aside className="admin-sidebar super-admin-sidebar">
                 <div className="sidebar-header">
                     <h2>🔐 Decisio</h2>
-                    <span className="sidebar-subtitle">Super Admin</span>
+                    <span className="sidebar-subtitle">{t('superAdmin.sidebar.title')}</span>
                 </div>
                 <nav className="sidebar-nav">
                     <button type="button" className="sidebar-item active">
                         <span className="sidebar-icon">🏢</span>
-                        <span className="sidebar-label">Companies & Admins</span>
+                        <span className="sidebar-label">{t('superAdmin.sidebar.companiesAdmins')}</span>
                     </button>
                 </nav>
                 <div className="sidebar-footer">
                     <div className="sidebar-user">
                         <div className="sidebar-user-name">{user?.full_name || user?.username}</div>
                         <div className="sidebar-user-type">
-                            <span className="user-type-badge" style={{ background: '#7c3aed' }}>super_admin</span>
+                            <span className="user-type-badge" style={{ background: '#7c3aed' }}>{t('superAdmin.sidebar.role')}</span>
                         </div>
                     </div>
+                    <div className="sidebar-language-toggle">
+                        <LanguageToggle lang={lang} onToggle={toggleLang} t={t} />
+                    </div>
                     <div className="sidebar-actions">
-                        <button className="sidebar-btn danger" onClick={logout}>Logout</button>
+                        <button className="sidebar-btn danger" onClick={logout}>{t('common.logout')}</button>
                     </div>
                 </div>
             </aside>
 
             <main className="admin-main">
                 <div className="admin-section">
-                    <h2 className="admin-title">Super Admin Dashboard</h2>
+                    <h2 className="admin-title">{t('superAdmin.dashboardTitle')}</h2>
                     <p className="admin-description">
-                        Create companies and assign an admin to each company. Company admins can then manage users, equipment, and settings for their tenant.
+                        {t('superAdmin.description')}
                     </p>
 
                     {error && !showCreateCompany && !showCreateAdmin && !showEditCompany && !showEditAdmin && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
@@ -282,41 +288,41 @@ export default function SuperAdminDashboard() {
 
                     {/* Companies */}
                     <div className="admin-header-row">
-                        <h3 className="admin-subtitle">Companies</h3>
+                        <h3 className="admin-subtitle">{t('superAdmin.companies')}</h3>
                         <button className="admin-btn primary" onClick={() => { setShowCreateCompany(true); setError(''); setCompanyForm({ name: '' }) }}>
-                            + Create Company
+                            {t('superAdmin.actions.createCompany')}
                         </button>
                     </div>
 
                     {loading ? (
-                        <div className="admin-loading">Loading companies...</div>
+                        <div className="admin-loading">{t('superAdmin.loadingCompanies')}</div>
                     ) : (
                         <div className="admin-table-wrap">
                             <table className="admin-table">
                                 <thead>
                                     <tr>
-                                        <th>ID</th>
-                                        <th>Name</th>
+                                        <th>{t('superAdmin.table.id')}</th>
+                                        <th>{t('superAdmin.table.name')}</th>
 
-                                        <th>Status</th>
-                                        <th>Actions</th>
+                                        <th>{t('superAdmin.table.status')}</th>
+                                        <th>{t('superAdmin.table.actions')}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {companies.length === 0 ? (
-                                        <tr><td colSpan={5} className="td-empty">No companies yet. Create one to get started.</td></tr>
+                                        <tr><td colSpan={5} className="td-empty">{t('superAdmin.emptyCompanies')}</td></tr>
                                     ) : companies.map(c => (
                                         <tr key={c.id}>
                                             <td className="td-mono">{c.id}</td>
                                             <td className="td-bold">{c.name}</td>
 
-                                            <td><span className={`status-badge ${c.is_active ? 'active' : 'inactive'}`}>{c.is_active ? 'Active' : 'Inactive'}</span></td>
+                                            <td><span className={`status-badge ${c.is_active ? 'active' : 'inactive'}`}>{c.is_active ? t('common.active') : t('common.inactive')}</span></td>
                                             <td>
-                                                <button type="button" className="admin-btn" style={{ padding: '4px 10px', fontSize: 12, marginRight: 6 }} onClick={() => openEditCompany(c)}>Edit</button>
+                                                <button type="button" className="admin-btn" style={{ padding: '4px 10px', fontSize: 12, marginInlineEnd: 6 }} onClick={() => openEditCompany(c)}>{t('common.edit')}</button>
                                                 {c.is_active ? (
-                                                    <button type="button" className="admin-btn danger" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleDeactivateCompany(c)}>Deactivate</button>
+                                                    <button type="button" className="admin-btn danger" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleDeactivateCompany(c)}>{t('common.deactivate')}</button>
                                                 ) : (
-                                                    <button type="button" className="admin-btn primary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleActivateCompany(c)}>Activate</button>
+                                                    <button type="button" className="admin-btn primary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleActivateCompany(c)}>{t('common.activate')}</button>
                                                 )}
                                             </td>
                                         </tr>
@@ -328,7 +334,7 @@ export default function SuperAdminDashboard() {
 
                     {/* Create admin for company */}
                     <div className="admin-header-row" style={{ marginTop: 32 }}>
-                        <h3 className="admin-subtitle">Create Company Admin</h3>
+                        <h3 className="admin-subtitle">{t('superAdmin.createCompanyAdmin')}</h3>
                         <button
                             className="admin-btn primary"
                             onClick={() => {
@@ -340,36 +346,36 @@ export default function SuperAdminDashboard() {
                             }}
                             disabled={companies.length === 0}
                         >
-                            + Create Admin for Company
+                            {t('superAdmin.actions.createAdminForCompany')}
                         </button>
                     </div>
                     {companies.length === 0 && (
-                        <p style={{ color: '#94a3b8', fontSize: 14, marginTop: 8 }}>Create a company first, then you can add an admin for it.</p>
+                        <p style={{ color: '#94a3b8', fontSize: 14, marginTop: 8 }}>{t('superAdmin.createCompanyFirst')}</p>
                     )}
 
                     {/* All Admins */}
                     <div className="admin-header-row" style={{ marginTop: 32 }}>
-                        <h3 className="admin-subtitle">All Admins</h3>
+                        <h3 className="admin-subtitle">{t('superAdmin.allAdmins')}</h3>
                     </div>
                     {adminsLoading ? (
-                        <div className="admin-loading">Loading admins...</div>
+                        <div className="admin-loading">{t('superAdmin.loadingAdmins')}</div>
                     ) : (
                         <div className="admin-table-wrap">
                             <table className="admin-table">
                                 <thead>
                                     <tr>
-                                        <th>ID</th>
-                                        <th>Username</th>
-                                        <th>Email</th>
-                                        <th>Full Name</th>
-                                        <th>Company</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
+                                        <th>{t('superAdmin.table.id')}</th>
+                                        <th>{t('superAdmin.adminTable.username')}</th>
+                                        <th>{t('superAdmin.adminTable.email')}</th>
+                                        <th>{t('superAdmin.adminTable.fullName')}</th>
+                                        <th>{t('superAdmin.adminTable.company')}</th>
+                                        <th>{t('superAdmin.table.status')}</th>
+                                        <th>{t('superAdmin.table.actions')}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {admins.length === 0 ? (
-                                        <tr><td colSpan={7} className="td-empty">No company admins yet. Create one above.</td></tr>
+                                        <tr><td colSpan={7} className="td-empty">{t('superAdmin.emptyAdmins')}</td></tr>
                                     ) : admins.map(a => (
                                         <tr key={a.id}>
                                             <td className="td-mono">{a.id}</td>
@@ -377,12 +383,12 @@ export default function SuperAdminDashboard() {
                                             <td>{a.email}</td>
                                             <td>{a.full_name || '—'}</td>
                                             <td>{a.company_name}</td>
-                                            <td><span className={`status-badge ${a.is_active ? 'active' : 'inactive'}`}>{a.is_active ? 'Active' : 'Inactive'}</span></td>
+                                            <td><span className={`status-badge ${a.is_active ? 'active' : 'inactive'}`}>{a.is_active ? t('common.active') : t('common.inactive')}</span></td>
                                             <td>
                                                 {a.is_active && (
                                                     <>
-                                                        <button type="button" className="admin-btn" style={{ padding: '4px 10px', fontSize: 12, marginRight: 6 }} onClick={() => openEditAdmin(a)}>Edit</button>
-                                                        <button type="button" className="admin-btn danger" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleDeleteAdmin(a)}>Delete</button>
+                                                        <button type="button" className="admin-btn" style={{ padding: '4px 10px', fontSize: 12, marginInlineEnd: 6 }} onClick={() => openEditAdmin(a)}>{t('common.edit')}</button>
+                                                        <button type="button" className="admin-btn danger" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleDeleteAdmin(a)}>{t('common.delete')}</button>
                                                     </>
                                                 )}
                                                 {!a.is_active && <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>}
@@ -397,10 +403,10 @@ export default function SuperAdminDashboard() {
             </main>
 
             {showCreateCompany && (
-                <Modal title="Create Company" error={error} onClose={() => { setShowCreateCompany(false); setError(''); }}>
+                <Modal title={t('superAdmin.modals.createCompany.title')} error={error} onClose={() => { setShowCreateCompany(false); setError(''); }}>
                     <form onSubmit={handleCreateCompany}>
                         <div className="form-group">
-                            <label>Company Name</label>
+                            <label>{t('superAdmin.modals.createCompany.companyName')}</label>
                             <input
                                 value={companyForm.name}
                                 onChange={e => setCompanyForm({ ...companyForm, name: e.target.value })}
@@ -410,34 +416,34 @@ export default function SuperAdminDashboard() {
                         </div>
 
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => { setShowCreateCompany(false); setError(''); }}>Cancel</button>
-                            <button type="submit" className="admin-btn primary">Create Company</button>
+                            <button type="button" className="admin-btn" onClick={() => { setShowCreateCompany(false); setError(''); }}>{t('common.cancel')}</button>
+                            <button type="submit" className="admin-btn primary">{t('superAdmin.actions.createCompany')}</button>
                         </div>
                     </form>
                 </Modal>
             )}
 
             {showCreateAdmin && (
-                <Modal title="Create Admin for Company" error={error} onClose={() => { setShowCreateAdmin(false); setError(''); }}>
+                <Modal title={t('superAdmin.modals.createAdmin.title')} error={error} onClose={() => { setShowCreateAdmin(false); setError(''); }}>
                     <form onSubmit={handleCreateAdmin}>
                         <div className="form-group">
-                            <label>Company (only companies without an admin)</label>
+                            <label>{t('superAdmin.modals.createAdmin.companyLabel')}</label>
                             <select
                                 value={selectedCompanyId}
                                 onChange={e => setSelectedCompanyId(e.target.value)}
                                 required
                             >
-                                <option value="">Select company...</option>
+                                <option value="">{t('superAdmin.modals.createAdmin.selectCompany')}</option>
                                 {companies.filter(c => !admins.some(a => a.company_id === c.id)).map(c => (
                                     <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}
                             </select>
                             {companies.filter(c => !admins.some(a => a.company_id === c.id)).length === 0 && companies.length > 0 && (
-                                <span style={{ fontSize: 12, color: 'var(--warning)' }}>All companies already have an admin. Edit an admin to change organization.</span>
+                                <span style={{ fontSize: 12, color: 'var(--warning)' }}>{t('superAdmin.modals.createAdmin.allHaveAdmin')}</span>
                             )}
                         </div>
                         <div className="form-group">
-                            <label>Username</label>
+                            <label>{t('superAdmin.adminTable.username')}</label>
                             <input
                                 value={adminForm.username}
                                 onChange={e => setAdminForm({ ...adminForm, username: e.target.value })}
@@ -445,7 +451,7 @@ export default function SuperAdminDashboard() {
                             />
                         </div>
                         <div className="form-group">
-                            <label>Email</label>
+                            <label>{t('superAdmin.adminTable.email')}</label>
                             <input
                                 type="email"
                                 value={adminForm.email}
@@ -454,7 +460,7 @@ export default function SuperAdminDashboard() {
                             />
                         </div>
                         <div className="form-group">
-                            <label>Password</label>
+                            <label>{t('common.password')}</label>
                             <input
                                 type="password"
                                 value={adminForm.password}
@@ -464,26 +470,26 @@ export default function SuperAdminDashboard() {
                             />
                         </div>
                         <div className="form-group">
-                            <label>Full Name</label>
+                            <label>{t('superAdmin.adminTable.fullName')}</label>
                             <input
                                 value={adminForm.full_name}
                                 onChange={e => setAdminForm({ ...adminForm, full_name: e.target.value })}
-                                placeholder="Optional"
+                                placeholder={t('common.optional')}
                             />
                         </div>
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => { setShowCreateAdmin(false); setError(''); }}>Cancel</button>
-                            <button type="submit" className="admin-btn primary">Create Admin</button>
+                            <button type="button" className="admin-btn" onClick={() => { setShowCreateAdmin(false); setError(''); }}>{t('common.cancel')}</button>
+                            <button type="submit" className="admin-btn primary">{t('superAdmin.actions.createAdmin')}</button>
                         </div>
                     </form>
                 </Modal>
             )}
 
             {showEditCompany && (
-                <Modal title="Edit Company" error={error} onClose={() => { setShowEditCompany(false); setError(''); }}>
+                <Modal title={t('superAdmin.modals.editCompany.title')} error={error} onClose={() => { setShowEditCompany(false); setError(''); }}>
                     <form onSubmit={handleUpdateCompany}>
                         <div className="form-group">
-                            <label>Company Name</label>
+                            <label>{t('superAdmin.modals.createCompany.companyName')}</label>
                             <input
                                 value={editCompanyForm.name}
                                 onChange={e => setEditCompanyForm({ ...editCompanyForm, name: e.target.value })}
@@ -492,31 +498,31 @@ export default function SuperAdminDashboard() {
                             />
                         </div>
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => { setShowEditCompany(false); setError(''); }}>Cancel</button>
-                            <button type="submit" className="admin-btn primary">Update Company</button>
+                            <button type="button" className="admin-btn" onClick={() => { setShowEditCompany(false); setError(''); }}>{t('common.cancel')}</button>
+                            <button type="submit" className="admin-btn primary">{t('superAdmin.actions.updateCompany')}</button>
                         </div>
                     </form>
                 </Modal>
             )}
 
             {showEditAdmin && (
-                <Modal title="Edit Admin" error={error} onClose={() => { setShowEditAdmin(false); setError(''); }}>
+                <Modal title={t('superAdmin.modals.editAdmin.title')} error={error} onClose={() => { setShowEditAdmin(false); setError(''); }}>
                     <form onSubmit={handleUpdateAdmin}>
                         <div className="form-group">
-                            <label>Organization (Company)</label>
+                            <label>{t('superAdmin.modals.editAdmin.organization')}</label>
                             <select
                                 value={editAdminForm.company_id}
                                 onChange={e => setEditAdminForm({ ...editAdminForm, company_id: e.target.value })}
                                 required
                             >
-                                <option value="">Select company...</option>
+                                <option value="">{t('superAdmin.modals.createAdmin.selectCompany')}</option>
                                 {companies.map(c => (
                                     <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}
                             </select>
                         </div>
                         <div className="form-group">
-                            <label>Email</label>
+                            <label>{t('superAdmin.adminTable.email')}</label>
                             <input
                                 type="email"
                                 value={editAdminForm.email}
@@ -525,15 +531,15 @@ export default function SuperAdminDashboard() {
                             />
                         </div>
                         <div className="form-group">
-                            <label>Full Name</label>
+                            <label>{t('superAdmin.adminTable.fullName')}</label>
                             <input
                                 value={editAdminForm.full_name}
                                 onChange={e => setEditAdminForm({ ...editAdminForm, full_name: e.target.value })}
-                                placeholder="Optional"
+                                placeholder={t('common.optional')}
                             />
                         </div>
                         <div className="form-group">
-                            <label>New Password (leave blank to keep current)</label>
+                            <label>{t('superAdmin.modals.editAdmin.newPassword')}</label>
                             <input
                                 type="password"
                                 value={editAdminForm.password}
@@ -542,8 +548,8 @@ export default function SuperAdminDashboard() {
                             />
                         </div>
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => { setShowEditAdmin(false); setError(''); }}>Cancel</button>
-                            <button type="submit" className="admin-btn primary">Update Admin</button>
+                            <button type="button" className="admin-btn" onClick={() => { setShowEditAdmin(false); setError(''); }}>{t('common.cancel')}</button>
+                            <button type="submit" className="admin-btn primary">{t('superAdmin.actions.updateAdmin')}</button>
                         </div>
                     </form>
                 </Modal>

@@ -22,6 +22,8 @@ export default function EscalationChat({
     minimized,
     onSessionClosed,
     embedded = false,
+    labels = {},
+    dir = 'ltr',
 }) {
     const [messages, setMessages] = useState([])
     const [input, setInput] = useState('')
@@ -106,7 +108,7 @@ export default function EscalationChat({
                         id: `sys-${Date.now()}`,
                         senderId: null,
                         senderRole: 'system',
-                        message: '✅ Shift manager has joined the chat.',
+                        message: labels.expertJoinedSystem || '✅ Shift manager has joined the chat.',
                         timestamp: data.timestamp,
                     }])
                     return
@@ -119,7 +121,7 @@ export default function EscalationChat({
                         id: `sys-${Date.now()}`,
                         senderId: null,
                         senderRole: 'system',
-                        message: 'Session has been closed by the shift manager.',
+                        message: labels.sessionClosedSystem || 'Session has been closed by the shift manager.',
                         timestamp: data.timestamp,
                     }])
                     // Notify parent so it can transition to decision brief / outcome buttons
@@ -229,34 +231,34 @@ export default function EscalationChat({
         return (
             <div className="escalation-chat-minimized" onClick={onMinimize}>
                 <span className={`status-dot ${statusDot}`}></span>
-                <span>💬 Escalation Chat</span>
+                <span>{labels.title || '💬 Escalation Chat'}</span>
                 {messages.length > 0 && <span className="chat-badge">{messages.length}</span>}
             </div>
         )
     }
 
     return (
-        <div className={`escalation-chat ${embedded ? 'escalation-chat-embedded' : ''}`}>
+        <div className={`escalation-chat ${embedded ? 'escalation-chat-embedded' : ''}`} dir={dir}>
             {/* Header */}
             <div className="chat-header">
                 <div className="chat-header-left">
                     <span className={`status-dot ${statusDot}`}></span>
-                    <span className="chat-header-title">💬 Escalation Chat</span>
+                    <span className="chat-header-title">{labels.title || '💬 Escalation Chat'}</span>
                     <span className="chat-status-text">
-                        {status === 'connected' && 'Connected'}
-                        {status === 'connecting' && 'Connecting...'}
-                        {status === 'disconnected' && 'Disconnected'}
-                        {status === 'closed' && 'Session Ended'}
+                        {status === 'connected' && (labels.statusConnected || 'Connected')}
+                        {status === 'connecting' && (labels.statusConnecting || 'Connecting...')}
+                        {status === 'disconnected' && (labels.statusDisconnected || 'Disconnected')}
+                        {status === 'closed' && (labels.statusClosed || 'Session Ended')}
                     </span>
                 </div>
                 <div className="chat-header-actions">
                     {canEndSession && status === 'connected' && (
-                        <button className="btn btn-sm btn-danger-outline" onClick={closeSession} title="Close Session">
-                            ✕ End
+                        <button className="btn btn-sm btn-danger-outline" onClick={closeSession} title={labels.closeSessionTitle || 'Close Session'}>
+                            {labels.endButton || '✕ End'}
                         </button>
                     )}
                     {!embedded && (
-                        <button className="btn btn-sm btn-outline" onClick={onMinimize} title="Minimize">
+                        <button className="btn btn-sm btn-outline" onClick={onMinimize} title={labels.minimizeTitle || 'Minimize'}>
                             ─
                         </button>
                     )}
@@ -272,15 +274,15 @@ export default function EscalationChat({
             <div className="chat-messages">
                 {messages.length === 0 && status === 'connected' && !expertPresent && !isExpert && (
                     <div className="chat-empty" style={{ color: '#f59e0b' }}>
-                        ⏳ Waiting for a shift manager to join…<br />
-                        <span style={{ fontSize: 12, opacity: 0.75 }}>You can type a message and they will see it when they connect.</span>
+                        {(labels.waitingShiftManager || '⏳ Waiting for a shift manager to join…')}<br />
+                        <span style={{ fontSize: 12, opacity: 0.75 }}>{labels.waitingShiftManagerHelp || 'You can type a message and they will see it when they connect.'}</span>
                     </div>
                 )}
                 {messages.length === 0 && status === 'connected' && isExpert && (
                     <div className="chat-empty">
                         {isAdmin
-                            ? 'View-only: you can review escalation messages here.'
-                            : 'You have joined the escalation. Send a message to start helping the operator.'}
+                            ? (labels.adminViewOnly || 'View-only: you can review escalation messages here.')
+                            : (labels.expertPrompt || 'You have joined the escalation. Send a message to start helping the operator.')}
                     </div>
                 )}
 
@@ -300,7 +302,7 @@ export default function EscalationChat({
                         <div key={msg.id} className={`chat-msg ${isMe ? 'chat-msg-me' : 'chat-msg-other'}`}>
                             <div className="chat-msg-meta">
                                 <span className="chat-msg-role">
-                                    {isMe ? 'You' : msg.senderRole === 'expert' ? '🔧 Expert' : `User #${msg.senderId}`}
+                                    {isMe ? (labels.you || 'You') : msg.senderRole === 'expert' ? (labels.roleExpert || '🔧 Expert') : (labels.userWithId ? labels.userWithId(msg.senderId) : `User #${msg.senderId}`)}
                                 </span>
                                 <span className="chat-msg-time">{formatTime(msg.timestamp)}</span>
                             </div>
@@ -321,7 +323,7 @@ export default function EscalationChat({
                         className="chat-input"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder={status === 'connected' ? 'Type a message...' : 'Waiting for connection...'}
+                        placeholder={status === 'connected' ? (labels.placeholderConnected || 'Type a message...') : (labels.placeholderWaiting || 'Waiting for connection...')}
                         disabled={status !== 'connected'}
                     />
                     <button
@@ -329,7 +331,7 @@ export default function EscalationChat({
                         className="btn chat-send-btn"
                         disabled={status !== 'connected' || !input.trim()}
                     >
-                        Send
+                        {labels.send || 'Send'}
                     </button>
                 </form>
             )}

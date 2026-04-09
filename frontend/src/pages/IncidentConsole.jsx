@@ -1,22 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createIncident, submitAnswer, submitOutcome, generateBrief, logout, getStoredUser, listIncidents, getIncident } from '../services/api'
 import EscalationChat from '../components/EscalationChat'
-
-const CATEGORY_LABELS = {
-    trigger: 'Trigger',
-    internal_equipment: 'Internal Equipment',
-    upstream: 'Upstream',
-    downstream: 'Downstream',
-    control: 'Control System',
-    instrumentation: 'Instrumentation',
-    utilities: 'Utilities',
-    process_conditions: 'Process Conditions',
-    procedure_human: 'Procedure/Human',
-    verification_closure: 'Verification',
-    clarification: 'Clarification',
-}
+import LanguageToggle from '../components/LanguageToggle'
+import { useI18n } from '../i18n'
 
 export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin }) {
+    const { lang, dir, t, toggleLang } = useI18n()
     const [messages, setMessages] = useState([])
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(false)
@@ -99,7 +88,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
             }
             if (data.decision_brief) {
                 if (data.escalation_triggered) {
-                    msgs.push({ id: Math.random(), type: 'system', content: { type: 'escalation_notice', message: '⏳ This incident requires immediate escalation. Connecting you with a specialist...' } })
+                    msgs.push({ id: Math.random(), type: 'system', content: { type: 'escalation_notice', message: t('userPage.escalationMessages.requiresImmediate') } })
                 }
                 if (data.escalation) {
                     msgs.push({ id: Math.random(), type: 'system', content: { type: 'escalation', data: data.escalation } })
@@ -139,18 +128,18 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
         const raw = err?.message || String(err)
         if (raw.includes('NoneType') || raw.startsWith('Processing error:') || raw.includes('object has no attribute')) {
             console.error(context, raw)
-            addMessage('system', { type: 'error', message: 'Something went wrong. Please try again or start a new incident.' })
+            addMessage('system', { type: 'error', message: t('common.unknownError') })
         } else {
             addMessage('system', { type: 'error', message: raw })
         }
     }
 
     const getPlaceholder = () => {
-        if (loading) return 'Processing...'
-        if (phase === 'idle') return 'Describe the incident...'
-        if (phase === 'diagnosing') return 'Answer the questions...'
-        if (phase === 'outcome') return 'Describe the outcome...'
-        return 'Type a message...'
+        if (loading) return t('userPage.placeholders.processing')
+        if (phase === 'idle') return t('userPage.placeholders.idle')
+        if (phase === 'diagnosing') return t('userPage.placeholders.diagnosing')
+        if (phase === 'outcome') return t('userPage.placeholders.outcome')
+        return t('userPage.placeholders.default')
     }
 
     const handleSubmit = async (e) => {
@@ -189,7 +178,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
                     if (data.escalation_triggered) {
                         // Generate brief if escalation triggered early in intake
-                        addMessage('system', { type: 'escalation_notice', message: '⏳ Based on incident severity, this requires immediate escalation. Please wait...' })
+                        addMessage('system', { type: 'escalation_notice', message: t('userPage.escalationMessages.basedOnSeverity') })
                         const briefData = await generateBrief(data.incident_id)
                         setIncident(briefData)
                         if (briefData.escalation) {
@@ -200,7 +189,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                 setPhase('escalation_chat')
                             }
                         }
-                        addMessage('system', { type: 'escalation_notice', message: '✅ Escalation request sent. An expert will review your incident shortly.' })
+                        addMessage('system', { type: 'escalation_notice', message: t('userPage.escalationMessages.requestSent') })
                         addMessage('system', { type: 'brief', data: briefData.decision_brief, escalationTriggered: true })
                         if (!briefData.escalation?.session_id) {
                             // Fallback: no session yet, stay in outcome so user can still see brief
@@ -260,7 +249,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                         setPhase('outcome')
                     } else if (data.escalation_triggered) {
                         // Generate brief if escalation triggered
-                        addMessage('system', { type: 'escalation_notice', message: '⏳ Based on the diagnosis, this incident needs to be escalated. Please wait...' })
+                        addMessage('system', { type: 'escalation_notice', message: t('userPage.escalationMessages.basedOnDiagnosis') })
                         const briefData = await generateBrief(data.incident_id)
                         setIncident(briefData)
                         if (briefData.escalation) {
@@ -271,7 +260,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                 setPhase('escalation_chat')
                             }
                         }
-                        addMessage('system', { type: 'escalation_notice', message: '✅ Escalation complete. An expert has been notified and will assist with this incident.' })
+                        addMessage('system', { type: 'escalation_notice', message: t('userPage.escalationMessages.complete') })
                         addMessage('system', { type: 'brief', data: briefData.decision_brief, escalationTriggered: true })
                         if (!briefData.escalation?.session_id) {
                             // Fallback: no session yet, stay in outcome so user can still see brief
@@ -311,11 +300,11 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                     setEscalationSession(null)
                     setChatMinimized(false)
                 } else if (data.escalation_triggered) {
-                    addMessage('system', { type: 'escalation_notice', message: '⏳ Your issue is being escalated to a specialist. Please wait while we connect you with the right team...' })
+                    addMessage('system', { type: 'escalation_notice', message: t('userPage.escalationMessages.issueEscalating') })
                     if (data.escalation) {
                         addMessage('system', { type: 'escalation', data: data.escalation })
                     }
-                    addMessage('system', { type: 'escalation_notice', message: '✅ Escalation request sent successfully. An expert has been notified and will review your incident. You will receive further guidance through the escalation channel.' })
+                    addMessage('system', { type: 'escalation_notice', message: t('userPage.escalationMessages.requestSentSuccessfully') })
                     // Open escalation chat if session exists
                     if (data.escalation?.session_id) {
                         setEscalationSession(data.escalation)
@@ -340,7 +329,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
         if (!incident?.incident_id) return
         setLoading(true)
         try {
-            addMessage('system', { type: 'status', data: { status: 'Saving success…' } })
+            addMessage('system', { type: 'status', data: { status: t('userPage.outcome.savingSuccess') } })
             const selectedOpt = outcomeSelectedOptionIdRef.current
             const data = await submitOutcome(incident.incident_id, 'success', selectedOpt)
             setIncident(data)
@@ -377,7 +366,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
     }
 
     return (
-        <div className="app">
+        <div className="app" dir={dir}>
             {/* Header */}
             <header className="header">
                 <h1>⚙️ <span>Decisio</span></h1>
@@ -388,13 +377,13 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                 <span className={`status-dot ${incident.escalation_triggered ? 'danger' : incident.confidence >= 0.8 ? 'active' : 'warning'}`}></span>
                                 {incident.status}
                             </span>
-                            <span>Risk: {incident.risk_score?.toFixed(1)}</span>
-                            <span>Confidence: {Math.round((incident.confidence || 0) * 100)}%</span>
+                            <span>{t('userPage.risk')}: {incident.risk_score?.toFixed(1)}</span>
+                            <span>{t('userPage.confidence')}: {Math.round((incident.confidence || 0) * 100)}%</span>
                         </>
                     )}
                     {(phase === 'closed' || phase === 'escalation_chat') && (
                         <button className="btn btn-outline" onClick={handleNewIncident} style={{ padding: '6px 12px', fontSize: '12px' }}>
-                            + New Incident
+                            {t('userPage.newIncident')}
                         </button>
                     )}
                     <div className="header-user-area">
@@ -408,9 +397,10 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                 }}
                                 style={{ borderColor: '#06b6d4', color: '#06b6d4' }}
                             >
-                                💬 Live chat with expert
+                                {t('userPage.chatControls.liveChatWithExpert')}
                             </button>
                         )}
+                        <LanguageToggle lang={lang} onToggle={toggleLang} t={t} />
                         <span className="header-username">{user?.full_name || user?.username}</span>
                         {user?.user_type === 'super_admin' && (
                             <button className="btn btn-outline btn-sm" onClick={onSuperAdmin} style={{ borderColor: '#7c3aed', color: '#7c3aed' }}>Super Admin</button>
@@ -418,7 +408,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                         {(user?.user_type === 'admin' || user?.user_type === 'super_admin') && (
                             <button className="btn btn-outline btn-sm" onClick={onAdmin}>Admin</button>
                         )}
-                        <button className="btn btn-outline btn-sm btn-danger-outline" onClick={logout}>Logout</button>
+                        <button className="btn btn-outline btn-sm btn-danger-outline" onClick={logout}>{t('common.logout')}</button>
                     </div>
                 </div>
             </header>
@@ -428,19 +418,20 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                 {showSidebar && (
                     <div className="sidebar" style={{
                         width: '280px',
-                        borderRight: '1px solid var(--border)',
+                        borderRight: dir === 'ltr' ? '1px solid var(--border)' : 'none',
+                        borderLeft: dir === 'rtl' ? '1px solid var(--border)' : 'none',
                         background: 'var(--bg-card)',
                         display: 'flex',
                         flexDirection: 'column',
                         overflowY: 'auto'
                     }}>
                         <div style={{ padding: '16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 style={{ margin: 0, fontSize: '14px', color: 'var(--text-bright)' }}>My Incidents</h3>
-                            <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={handleNewIncident}>+ New</button>
+                            <h3 style={{ margin: 0, fontSize: '14px', color: 'var(--text-bright)' }}>{t('userPage.myIncidents')}</h3>
+                            <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={handleNewIncident}>{t('userPage.new')}</button>
                         </div>
                         {history.length === 0 && (
                             <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px' }}>
-                                No past incidents.
+                                {t('userPage.noPastIncidents')}
                             </div>
                         )}
                         {history.map(inc => (
@@ -455,7 +446,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                 }}
                             >
                                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-bright)', marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    {inc.summary || 'New Incident'}
+                                    {inc.summary || t('userPage.newIncidentSummary')}
                                 </div>
                                 <div style={{ fontSize: '12px', color: 'var(--text-dim)', display: 'flex', justifyContent: 'space-between' }}>
                                     <span>{inc.status}</span>
@@ -463,7 +454,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                 </div>
                                 {(inc.risk_score > 0 || inc.confidence > 0) && (
                                     <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
-                                        Risk: {inc.risk_score.toFixed(1)} | Conf: {Math.round(inc.confidence * 100)}%
+                                        {t('userPage.riskShort')}: {inc.risk_score.toFixed(1)} | {t('userPage.confShort')}: {Math.round(inc.confidence * 100)}%
                                     </div>
                                 )}
                             </div>
@@ -480,8 +471,8 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                 <div className="welcome-icon">⚙️</div>
                                 <h2>Decisio</h2>
                                 <p>
-                                    Operational Decision Support System.<br />
-                                    Describe an incident to begin diagnosis.
+                                    {t('userPage.welcomeSubtitleLine1')}<br />
+                                    {t('userPage.welcomeSubtitleLine2')}
                                 </p>
                             </div>
                         )}
@@ -490,22 +481,22 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                             <div key={msg.id} className={`message ${msg.type === 'user' ? 'message-user' : 'message-system'}`}>
                                 {msg.type === 'user' && (
                                     <>
-                                        <div className="message-label">You</div>
+                                        <div className="message-label">{t('common.you')}</div>
                                         <div>{msg.content}</div>
                                     </>
                                 )}
 
-                                {msg.type === 'system' && renderSystemMessage(msg.content, handleOutcomeButton, phase)}
+                                {msg.type === 'system' && renderSystemMessage(msg.content, handleOutcomeButton, phase, t)}
                             </div>
                         ))}
 
-                        {loading && (
+                                {loading && (
                             <div className="message message-system">
                                 <div className="loading">
                                     <div className="loading-dots">
                                         <span></span><span></span><span></span>
                                     </div>
-                                    Analyzing...
+                                    {t('userPage.loadingAnalyzing')}
                                 </div>
                             </div>
                         )}
@@ -520,6 +511,29 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                 userId={storedUser?.id}
                                 userRole={user?.user_type}
                                 minimized={chatMinimized}
+                                dir={dir}
+                                labels={{
+                                    title: t('userPage.chat.title'),
+                                    statusConnected: t('userPage.chat.statusConnected'),
+                                    statusConnecting: t('userPage.chat.statusConnecting'),
+                                    statusDisconnected: t('userPage.chat.statusDisconnected'),
+                                    statusClosed: t('userPage.chat.statusClosed'),
+                                    closeSessionTitle: t('userPage.chat.closeSessionTitle'),
+                                    endButton: t('userPage.chat.endButton'),
+                                    minimizeTitle: t('userPage.chat.minimizeTitle'),
+                                    waitingShiftManager: t('userPage.chat.waitingShiftManager'),
+                                    waitingShiftManagerHelp: t('userPage.chat.waitingShiftManagerHelp'),
+                                    adminViewOnly: t('userPage.chat.adminViewOnly'),
+                                    expertPrompt: t('userPage.chat.expertPrompt'),
+                                    expertJoinedSystem: t('userPage.chat.expertJoinedSystem'),
+                                    sessionClosedSystem: t('userPage.chat.sessionClosedSystem'),
+                                    roleExpert: t('userPage.chat.roleExpert'),
+                                    userWithId: (id) => t('userPage.chat.userWithId', { id }),
+                                    placeholderConnected: t('userPage.chat.placeholderConnected'),
+                                    placeholderWaiting: t('userPage.chat.placeholderWaiting'),
+                                    send: t('common.send'),
+                                    you: t('common.you'),
+                                }}
                                 onMinimize={() => setChatMinimized(prev => !prev)}
                                 onSessionClosed={async () => {
                                     // After escalation chat closes, transition to outcome (success/fail buttons)
@@ -553,20 +567,20 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                             color: '#fff',
                                             border: 'none',
                                         }}
-                                        title="Mark as resolved and store the pattern"
+                                        title={t('userPage.chatControls.markResolvedTitle')}
                                     >
-                                        ✅ Success
+                                        {t('userPage.chatControls.successButton')}
                                     </button>
                                     <button
                                         className="btn btn-sm btn-outline"
                                         onClick={() => setChatMinimized(true)}
                                         disabled={loading}
-                                        title="Hide chat panel"
+                                        title={t('userPage.chatControls.hideChatTitle')}
                                     >
-                                        ✕ End chat
+                                        {t('userPage.chatControls.endChatButton')}
                                     </button>
                                     <span style={{ fontSize: 12, opacity: 0.8 }}>
-                                        Success will save the resolution and write it to Decision Memory.
+                                        {t('userPage.chatControls.successHelp')}
                                     </span>
                                 </div>
                             )}
@@ -601,7 +615,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                     type="submit"
                                     className={`gpt-input-icon gpt-send-btn ${input.trim() ? 'has-text' : ''}`}
                                     disabled={loading || !input.trim()}
-                                    title="Send"
+                                    title={t('common.send')}
                                 >
                                     {input.trim() ? (
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a1 1 0 0 1 .707.293l.003.003-7.5 7.5a1 1 0 0 1-1.414-1.414L10.586 3H4a1 1 0 0 1 0-2h8z" transform="rotate(0 12 12)" /><path d="M12 3.414l5.293 5.293a1 1 0 0 0 1.414-1.414l-6-6a1 1 0 0 0-1.414 0l-6 6a1 1 0 0 0 1.414 1.414L12 3.414z" /><path d="M11 21V4h2v17h-2z" /></svg>
@@ -610,7 +624,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                     )}
                                 </button>
                             </form>
-                            <div className="gpt-input-disclaimer">Decisio can make mistakes. Verify important decisions.</div>
+                            <div className="gpt-input-disclaimer">{t('userPage.disclaimer')}</div>
                         </div>
                     )}
                 </div>
@@ -619,22 +633,22 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
     )
 }
 
-function renderSystemMessage(content, onOutcome, phase) {
+function renderSystemMessage(content, onOutcome, phase, t) {
     if (typeof content === 'string') {
         return <div>{content}</div>
     }
 
     switch (content.type) {
         case 'incident_card':
-            return <IncidentCard data={content.data} />
+            return <IncidentCard data={content.data} t={t} />
         case 'questions':
-            return <Questions data={content.data} step={content.step} />
+            return <Questions data={content.data} step={content.step} t={t} />
         case 'status':
-            return <StatusBar data={content.data} />
+            return <StatusBar data={content.data} t={t} />
         case 'brief':
-            return <DecisionBrief data={content.data} onOutcome={onOutcome} showOutcome={phase === 'outcome'} escalationTriggered={content.escalationTriggered} />
+            return <DecisionBrief data={content.data} onOutcome={onOutcome} showOutcome={phase === 'outcome'} escalationTriggered={content.escalationTriggered} t={t} />
         case 'patterns':
-            return <Patterns data={content.data} />
+            return <Patterns data={content.data} t={t} />
         case 'memory_guidance':
             return (
                 <div style={{
@@ -646,12 +660,12 @@ function renderSystemMessage(content, onOutcome, phase) {
                     color: 'var(--text-bright)',
                     lineHeight: 1.55,
                 }}>
-                    <div className="message-label" style={{ marginBottom: 6 }}>Decision Memory</div>
+                    <div className="message-label" style={{ marginBottom: 6 }}>{t('userPage.decisionMemory.title')}</div>
                     {content.message}
                 </div>
             )
         case 'escalation':
-            return <Escalation data={content.data} />
+            return <Escalation data={content.data} t={t} />
         case 'escalation_notice':
             return (
                 <div style={{
@@ -667,7 +681,7 @@ function renderSystemMessage(content, onOutcome, phase) {
                 </div>
             )
         case 'outcome_result':
-            return <OutcomeResult data={content.data} />
+            return <OutcomeResult data={content.data} t={t} />
         case 'error':
             return <div style={{ color: 'var(--danger)' }}>❌ {content.message}</div>
         default:
@@ -676,40 +690,40 @@ function renderSystemMessage(content, onOutcome, phase) {
 }
 
 
-function IncidentCard({ data }) {
+function IncidentCard({ data, t }) {
     if (!data) return null
     const severityClass = `badge badge-${data.severity || 'medium'}`
 
     return (
         <>
-            <div className="message-label">Incident Card</div>
+            <div className="message-label">{t('userPage.incidentCard.title')}</div>
             <div style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--text-bright)', fontWeight: 500 }}>
                 {data.normalized_summary}
             </div>
             <div className="incident-card">
                 <div className="incident-field">
-                    <div className="incident-field-label">Asset</div>
-                    <div className="incident-field-value">{data.asset_id || '—'}</div>
+                    <div className="incident-field-label">{t('userPage.incidentCard.asset')}</div>
+                    <div className="incident-field-value">{data.asset_id || t('common.notAvailable')}</div>
                 </div>
                 <div className="incident-field">
-                    <div className="incident-field-label">Severity</div>
+                    <div className="incident-field-label">{t('userPage.incidentCard.severity')}</div>
                     <div className="incident-field-value"><span className={severityClass}>{data.severity}</span></div>
                 </div>
                 <div className="incident-field">
-                    <div className="incident-field-label">Safety</div>
-                    <div className="incident-field-value">{data.safety_level || '—'}</div>
+                    <div className="incident-field-label">{t('userPage.incidentCard.safety')}</div>
+                    <div className="incident-field-value">{data.safety_level || t('common.notAvailable')}</div>
                 </div>
                 <div className="incident-field">
-                    <div className="incident-field-label">Risk</div>
-                    <div className="incident-field-value">{data.initial_risk_score ?? '—'}</div>
+                    <div className="incident-field-label">{t('userPage.incidentCard.risk')}</div>
+                    <div className="incident-field-value">{data.initial_risk_score ?? t('common.notAvailable')}</div>
                 </div>
                 <div className="incident-field">
-                    <div className="incident-field-label">Scope</div>
-                    <div className="incident-field-value">{data.scope || '—'}</div>
+                    <div className="incident-field-label">{t('userPage.incidentCard.scope')}</div>
+                    <div className="incident-field-value">{data.scope || t('common.notAvailable')}</div>
                 </div>
                 <div className="incident-field">
-                    <div className="incident-field-label">Symptoms</div>
-                    <div className="incident-field-value">{data.symptoms?.join(', ') || '—'}</div>
+                    <div className="incident-field-label">{t('userPage.incidentCard.symptoms')}</div>
+                    <div className="incident-field-value">{data.symptoms?.join(', ') || t('common.notAvailable')}</div>
                 </div>
             </div>
         </>
@@ -717,20 +731,20 @@ function IncidentCard({ data }) {
 }
 
 
-function Questions({ data, step }) {
+function Questions({ data, step, t }) {
     if (!data?.length) return null
-    const stepLabel = step ? `Step ${step}/10` : ''
+    const stepLabel = step ? t('userPage.questions.stepFormat', { step }) : ''
 
     return (
         <>
             <div className="message-label">
-                {data.some(q => q.category === 'clarification') ? 'Intake Question' : `Diagnostic Questions — ${stepLabel}`}
+                {data.some(q => q.category === 'clarification') ? t('userPage.questions.intake') : `${t('userPage.questions.diagnostic')} — ${stepLabel}`}
             </div>
             <div className="questions-list">
                 {data.map((q, i) => (
                     <div key={i} className="question-item">
                         <div className="question-category">
-                            {CATEGORY_LABELS[q.category] || q.category}
+                            {t(`userPage.questions.categories.${q.category}`) !== `userPage.questions.categories.${q.category}` ? t(`userPage.questions.categories.${q.category}`) : q.category}
                             {q.blocking_safety_flag && ' ⚠️'}
                         </div>
                         {q.question}
@@ -742,15 +756,15 @@ function Questions({ data, step }) {
 }
 
 
-function StatusBar({ data }) {
+function StatusBar({ data, t }) {
     return (
         <div className="status-bar">
-            <span className="status-chip">Risk <strong>{data.risk_score?.toFixed(1)}</strong></span>
-            <span className="status-chip">Confidence <strong>{Math.round((data.confidence || 0) * 100)}%</strong></span>
-            <span className="status-chip">Step <strong>{data.current_diagnostic_step}/10</strong></span>
+            <span className="status-chip">{t('userPage.statusBar.risk')} <strong>{data.risk_score?.toFixed(1)}</strong></span>
+            <span className="status-chip">{t('userPage.statusBar.confidence')} <strong>{Math.round((data.confidence || 0) * 100)}%</strong></span>
+            <span className="status-chip">{t('userPage.statusBar.step')} <strong>{data.current_diagnostic_step}/10</strong></span>
             {data.escalation_triggered && (
                 <span className="status-chip" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>
-                    ⚠️ Escalation
+                    {t('userPage.statusBar.escalation')}
                 </span>
             )}
             {data.hypotheses?.slice(0, 2).map((h, i) => (
@@ -763,7 +777,7 @@ function StatusBar({ data }) {
 }
 
 
-function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered }) {
+function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered, t }) {
     const [selectedOption, setSelectedOption] = useState(null)
 
     useEffect(() => {
@@ -779,13 +793,13 @@ function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered }) {
 
     return (
         <>
-            <div className="message-label">📋 Decision Brief</div>
+            <div className="message-label">{t('userPage.decisionBrief.title')}</div>
             <div className="brief">
                 <div className="brief-meta">
-                    <span className="brief-meta-item">Confidence: <strong>{Math.round((data.overall_confidence || 0) * 100)}%</strong></span>
-                    <span className="brief-meta-item">Authority: <strong>{data.decision_authority || '—'}</strong></span>
+                    <span className="brief-meta-item">{t('userPage.decisionBrief.confidence')}: <strong>{Math.round((data.overall_confidence || 0) * 100)}%</strong></span>
+                    <span className="brief-meta-item">{t('userPage.decisionBrief.authority')}: <strong>{data.decision_authority || t('common.notAvailable')}</strong></span>
                     {data.escalation_path && (
-                        <span className="brief-meta-item">Escalation: <strong>{data.escalation_path}</strong></span>
+                        <span className="brief-meta-item">{t('userPage.decisionBrief.escalation')}: <strong>{data.escalation_path}</strong></span>
                     )}
                 </div>
 
@@ -803,7 +817,7 @@ function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered }) {
                     >
                         <div className="option-header">
                             <span className="option-title">{opt.title}</span>
-                            {!escalationTriggered && opt.recommended && <span className="option-badge">Recommended</span>}
+                            {!escalationTriggered && opt.recommended && <span className="option-badge">{t('userPage.decisionBrief.recommended')}</span>}
                         </div>
                         <div className="option-desc">{opt.description}</div>
                         <div className="option-tags">
@@ -815,7 +829,7 @@ function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered }) {
 
                 {data.safety_constraints?.length > 0 && (
                     <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--warning)' }}>
-                        ⚠️ Safety: {data.safety_constraints.join(' • ')}
+                        {t('userPage.decisionBrief.safety')}: {data.safety_constraints.join(' • ')}
                     </div>
                 )}
 
@@ -835,10 +849,10 @@ function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered }) {
                             }}
                             style={{ fontSize: '13px', padding: '8px 16px' }}
                         >
-                            ✅ Success
+                            {t('userPage.decisionBrief.success')}
                         </button>
                         <button className="btn btn-danger" onClick={() => onOutcome('failure', null)} style={{ fontSize: '13px', padding: '8px 16px' }}>
-                            ❌ Failure
+                            {t('userPage.decisionBrief.failure')}
                         </button>
                     </div>
                 )}
@@ -848,21 +862,21 @@ function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered }) {
 }
 
 
-function Patterns({ data }) {
+function Patterns({ data, t }) {
     if (!data?.length) return null
     return (
         <>
-            <div className="message-label">Similar Past Incidents</div>
+            <div className="message-label">{t('userPage.patterns.title')}</div>
             {data.map((p, i) => (
                 <div key={i} style={{ fontSize: '13px', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                     <span style={{ color: 'var(--text-bright)' }}>{p.title}</span>
                     <span style={{ color: 'var(--text-dim)', marginLeft: '8px' }}>
                         {Math.round(p.similarity_score * 100)}%
                     </span>
-                    {p.must_escalate && <span style={{ color: 'var(--danger)', marginLeft: '8px' }}>⚠️ Must Escalate</span>}
+                    {p.must_escalate && <span style={{ color: 'var(--danger)', marginLeft: '8px' }}>{t('userPage.patterns.mustEscalate')}</span>}
                     {p.decision_taken && (
                         <div style={{ color: 'var(--text-dim)', marginTop: 4, fontSize: '12px', lineHeight: 1.45 }}>
-                            Prior decision: {p.decision_taken}
+                            {t('userPage.patterns.priorDecision')}: {p.decision_taken}
                         </div>
                     )}
                 </div>
@@ -872,24 +886,23 @@ function Patterns({ data }) {
 }
 
 
-function Escalation({ data }) {
+function Escalation({ data, t }) {
     if (!data) return null
 
     // Edge case: no escalation matrix configured for this company
     if (data.pending_config) {
         return (
             <>
-                <div className="message-label" style={{ color: 'var(--warning)' }}>⏳ Escalation Pending</div>
+                <div className="message-label" style={{ color: 'var(--warning)' }}>{t('userPage.escalation.pendingTitle')}</div>
                 <div className="escalation-box" style={{ borderColor: 'var(--warning)' }}>
                     <div className="escalation-level" style={{ color: 'var(--warning)' }}>
-                        ⚙️ Escalation Matrix Not Configured
+                        {t('userPage.escalation.pendingHeading')}
                     </div>
                     <div style={{ fontSize: '13px', color: 'var(--text-dim)', marginTop: 6 }}>
-                        {data.escalation_level_description || 'No escalation levels have been set up for your company.'}
+                        {data.escalation_level_description || t('userPage.escalation.pendingDescriptionDefault')}
                     </div>
                     <div style={{ fontSize: '12px', marginTop: '8px', color: 'var(--text-dim)', opacity: 0.8 }}>
-                        Your incident has been flagged for escalation but is waiting until an administrator
-                        configures the escalation matrix in <strong>Admin Portal → Escalation</strong>.
+                        {t('userPage.escalation.pendingHelp')}
                     </div>
                 </div>
             </>
@@ -898,27 +911,27 @@ function Escalation({ data }) {
 
     return (
         <>
-            <div className="message-label" style={{ color: 'var(--danger)' }}>🔴 Escalation</div>
+            <div className="message-label" style={{ color: 'var(--danger)' }}>{t('userPage.escalation.title')}</div>
             <div className="escalation-box">
                 <div className="escalation-level">
-                    Level {data.escalation_level}: {data.escalation_level_name}
+                    {t('userPage.escalation.level', { level: data.escalation_level })}: {data.escalation_level_name}
                 </div>
                 <div style={{ fontSize: '13px', color: 'var(--text-dim)' }}>
                     {data.escalation_summary}
                 </div>
                 {data.decision_authority && (
                     <div style={{ fontSize: '12px', marginTop: '6px' }}>
-                        Authority: <strong>{data.decision_authority}</strong>
+                        {t('userPage.escalation.authority')}: <strong>{data.decision_authority}</strong>
                     </div>
                 )}
                 {data.escalation_target && (
                     <div style={{ fontSize: '12px', marginTop: '2px' }}>
-                        Escalation: <strong>{data.escalation_target}</strong>
+                        {t('userPage.escalation.escalationTarget')}: <strong>{data.escalation_target}</strong>
                     </div>
                 )}
                 {data.urgency && (
                     <div style={{ fontSize: '12px', marginTop: '6px', color: 'var(--warning)' }}>
-                        Urgency: {data.urgency}
+                        {t('userPage.escalation.urgency')}: {data.urgency}
                     </div>
                 )}
             </div>
@@ -927,17 +940,17 @@ function Escalation({ data }) {
 }
 
 
-function OutcomeResult({ data }) {
+function OutcomeResult({ data, t }) {
     const isSuccess = data.outcome === 'success'
     return (
         <>
             <div className="message-label" style={{ color: isSuccess ? 'var(--success)' : 'var(--danger)' }}>
-                {isSuccess ? '✅ Resolved' : '❌ Resolution Failed'}
+                {isSuccess ? t('userPage.outcome.resolved') : t('userPage.outcome.failed')}
             </div>
             <div style={{ fontSize: '13px', color: 'var(--text-dim)' }}>
-                Status: {data.status}
-                {data.memory_written && ' • Decision pattern saved to memory'}
-                {data.failed_attempts > 0 && ` • ${data.failed_attempts} failed attempt(s)`}
+                {t('userPage.outcome.status')}: {data.status}
+                {data.memory_written && ` • ${t('userPage.outcome.memoryWritten')}`}
+                {data.failed_attempts > 0 && ` • ${t('userPage.outcome.failedAttempts', { count: data.failed_attempts })}`}
             </div>
         </>
     )

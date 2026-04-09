@@ -11,17 +11,21 @@ import {
     getAdminNotifications, markNotificationRead, markAllNotificationsRead,
 } from '../services/api'
 import EscalationChat from '../components/EscalationChat'
+import LanguageToggle from '../components/LanguageToggle'
+import { useI18n } from '../i18n'
 
-const SECTIONS = [
-    { id: 'dashboard', label: '📊 Dashboard', icon: '📊' },
-    { id: 'users', label: '👥 Users', icon: '👥' },
-    { id: 'incidents', label: '🔧 Incidents', icon: '🔧' },
-    { id: 'equipment', label: '📦 Equipment', icon: '📦' },
-    { id: 'safety', label: '🛡️ Safety Rules', icon: '🛡️' },
-    { id: 'escalation', label: '📈 Escalation', icon: '📈' },
-    { id: 'live', label: '💬 Live Chats', icon: '💬' },
-    { id: 'reports', label: '📋 Reports', icon: '📋' },
-]
+function getSections(t) {
+    return [
+        { id: 'dashboard', label: t('adminPage.sidebar.sections.dashboard'), icon: '📊' },
+        { id: 'users', label: t('adminPage.sidebar.sections.users'), icon: '👥' },
+        { id: 'incidents', label: t('adminPage.sidebar.sections.incidents'), icon: '🔧' },
+        { id: 'equipment', label: t('adminPage.sidebar.sections.equipment'), icon: '📦' },
+        { id: 'safety', label: t('adminPage.sidebar.sections.safety'), icon: '🛡️' },
+        { id: 'escalation', label: t('adminPage.sidebar.sections.escalation'), icon: '📈' },
+        { id: 'live', label: t('adminPage.sidebar.sections.live'), icon: '💬' },
+        { id: 'reports', label: t('adminPage.sidebar.sections.reports'), icon: '📋' },
+    ]
+}
 
 const TYPE_COLORS = {
     admin: '#ef4444',
@@ -37,6 +41,7 @@ function userTypeColor(userType) {
 }
 
 function NotificationDropdown({ notifications, onNotifClick, onMarkAll }) {
+    const { t } = useI18n()
     const unread = notifications.filter(n => !n.is_read)
     const read = notifications.filter(n => n.is_read)
     const shown = [...unread, ...read].slice(0, 20)
@@ -44,15 +49,15 @@ function NotificationDropdown({ notifications, onNotifClick, onMarkAll }) {
     return (
         <div className="notif-dropdown">
             <div className="notif-dropdown-header">
-                <span>Notifications</span>
+                <span>{t('adminPage.sidebar.notifications')}</span>
                 {unread.length > 0 && (
                     <button type="button" className="notif-mark-all-btn" onClick={onMarkAll}>
-                        Mark all read
+                        {t('adminPage.sidebar.markAllRead')}
                     </button>
                 )}
             </div>
             {shown.length === 0 && (
-                <div className="notif-empty">No notifications</div>
+                <div className="notif-empty">{t('adminPage.sidebar.noNotifications')}</div>
             )}
             {shown.map(n => (
                 <button
@@ -76,6 +81,8 @@ function NotificationDropdown({ notifications, onNotifClick, onMarkAll }) {
 }
 
 export default function AdminPortal() {
+    const { dir, lang, t, toggleLang } = useI18n()
+    const sections = getSections(t)
     const [section, setSection] = useState('dashboard')
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const [showPwModal, setShowPwModal] = useState(false)
@@ -218,38 +225,38 @@ export default function AdminPortal() {
     const handlePwChange = async (e) => {
         e.preventDefault()
         setPwError(''); setPwSuccess('')
-        if (pwForm.new_pw !== pwForm.confirm) { setPwError('Passwords do not match'); return }
-        if (pwForm.new_pw.length < 8) { setPwError('Password must have at least 8 characters'); return }
+        if (pwForm.new_pw !== pwForm.confirm) { setPwError(t('adminPage.passwordModal.errors.noMatch')); return }
+        if (pwForm.new_pw.length < 8) { setPwError(t('adminPage.passwordModal.errors.minLength')); return }
         try {
             await changePassword(pwForm.current, pwForm.new_pw)
-            setPwSuccess('Password changed successfully!')
+            setPwSuccess(t('adminPage.passwordModal.success'))
             setPwForm({ current: '', new_pw: '', confirm: '' })
             setTimeout(() => setShowPwModal(false), 1500)
         } catch (err) { setPwError(err.message) }
     }
 
     return (
-        <div className={`admin-layout ${sidebarOpen ? 'admin-sidebar-open' : ''}`}>
+        <div className={`admin-layout ${sidebarOpen ? 'admin-sidebar-open' : ''}`} dir={dir}>
             <div className="admin-sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
             <header className="admin-mobile-header">
                 <h2>⚙️ Decisio</h2>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button type="button" className="admin-sidebar-toggle" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
+                    <button type="button" className="admin-sidebar-toggle" onClick={() => setSidebarOpen(true)} aria-label={t('adminPage.sidebar.openMenu')}>☰</button>
                 </div>
             </header>
             <aside className="admin-sidebar">
                 <div className="sidebar-header">
                     <h2>⚙️ Decisio</h2>
-                    <span className="sidebar-subtitle">Admin Portal</span>
+                    <span className="sidebar-subtitle">{t('adminPage.sidebar.title')}</span>
                     {/* Bell icon — sits below the title in the sidebar header */}
                     <div ref={notifRef} className="notif-bell-wrapper">
                         <button
                             type="button"
                             className="notif-bell-btn"
                             onClick={() => setNotifOpen(o => !o)}
-                            aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
+                            aria-label={`${t('adminPage.sidebar.notifications')}${unreadCount > 0 ? ` (${unreadCount} ${t('adminPage.sidebar.unread')})` : ''}`}
                         >
-                            🔔 Notifications
+                            🔔 {t('adminPage.sidebar.notifications')}
                             {unreadCount > 0 && (
                                 <span className="notif-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>
                             )}
@@ -264,7 +271,7 @@ export default function AdminPortal() {
                     </div>
                 </div>
                 <nav className="sidebar-nav">
-                    {SECTIONS.map(s => (
+                    {sections.map(s => (
                         <button
                             key={s.id}
                             type="button"
@@ -272,7 +279,7 @@ export default function AdminPortal() {
                             onClick={() => { setSection(s.id); setSidebarOpen(false); }}
                         >
                             <span className="sidebar-icon">{s.icon}</span>
-                            <span className="sidebar-label">{s.label.split(' ').slice(1).join(' ')}</span>
+                            <span className="sidebar-label">{s.label}</span>
                         </button>
                     ))}
                 </nav>
@@ -285,9 +292,12 @@ export default function AdminPortal() {
                             </span>
                         </div>
                     </div>
+                    <div className="sidebar-language-toggle">
+                        <LanguageToggle lang={lang} onToggle={toggleLang} t={t} />
+                    </div>
                     <div className="sidebar-actions">
-                        <button className="sidebar-btn" onClick={() => setShowPwModal(true)}>🔑 Password</button>
-                        <button className="sidebar-btn danger" onClick={logout}>Logout</button>
+                        <button className="sidebar-btn" onClick={() => setShowPwModal(true)}>🔑 {t('adminPage.sidebar.password')}</button>
+                        <button className="sidebar-btn danger" onClick={logout}>{t('common.logout')}</button>
                     </div>
                 </div>
             </aside>
@@ -308,15 +318,15 @@ export default function AdminPortal() {
             </main>
 
             {showPwModal && (
-                <Modal title="Change Password" error={pwError} onClose={() => { setShowPwModal(false); setPwError(''); }}>
+                <Modal title={t('adminPage.passwordModal.title')} error={pwError} onClose={() => { setShowPwModal(false); setPwError(''); }}>
                     <form onSubmit={handlePwChange}>
-                        <div className="form-group"><label>Current Password</label><input type="password" value={pwForm.current} onChange={e => setPwForm({ ...pwForm, current: e.target.value })} required /></div>
-                        <div className="form-group"><label>New Password</label><input type="password" value={pwForm.new_pw} onChange={e => setPwForm({ ...pwForm, new_pw: e.target.value })} required /></div>
-                        <div className="form-group"><label>Confirm New Password</label><input type="password" value={pwForm.confirm} onChange={e => setPwForm({ ...pwForm, confirm: e.target.value })} required /></div>
+                        <div className="form-group"><label>{t('adminPage.passwordModal.current')}</label><input type="password" value={pwForm.current} onChange={e => setPwForm({ ...pwForm, current: e.target.value })} required /></div>
+                        <div className="form-group"><label>{t('adminPage.passwordModal.next')}</label><input type="password" value={pwForm.new_pw} onChange={e => setPwForm({ ...pwForm, new_pw: e.target.value })} required /></div>
+                        <div className="form-group"><label>{t('adminPage.passwordModal.confirm')}</label><input type="password" value={pwForm.confirm} onChange={e => setPwForm({ ...pwForm, confirm: e.target.value })} required /></div>
                         {pwSuccess && <div style={{ color: '#10b981', margin: '8px 0', fontWeight: 600 }}>{pwSuccess}</div>}
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => setShowPwModal(false)}>Cancel</button>
-                            <button type="submit" className="admin-btn primary">Change Password</button>
+                            <button type="button" className="admin-btn" onClick={() => setShowPwModal(false)}>{t('common.cancel')}</button>
+                            <button type="submit" className="admin-btn primary">{t('adminPage.passwordModal.submit')}</button>
                         </div>
                     </form>
                 </Modal>
@@ -353,6 +363,7 @@ const DEFAULT_STATS = {
 }
 
 function DashboardSection() {
+    const { t } = useI18n()
     const [stats, setStats] = useState(null)
     const [kpis, setKpis] = useState(null)
     const [loading, setLoading] = useState(true)
@@ -369,7 +380,7 @@ function DashboardSection() {
                 .catch((err) => {
                     if (isMounted) {
                         setStats(DEFAULT_STATS)
-                        setLoadError(err?.message || 'Failed to load dashboard data')
+                        setLoadError(err?.message || t('adminPage.dashboard.failedToLoad'))
                     }
                 }),
             getKpiStats().then(data => { if (isMounted) setKpis(data) }).catch(() => { if (isMounted) setKpis(null) }),
@@ -378,25 +389,25 @@ function DashboardSection() {
         return () => { isMounted = false; }
     }, [])
 
-    if (loading && !stats) return <div className="admin-loading">Loading dashboard...</div>
+    if (loading && !stats) return <div className="admin-loading">{t('adminPage.dashboard.loading')}</div>
 
     const data = stats || DEFAULT_STATS
     const cards = [
-        { label: 'Total Incidents', value: data.total_incidents, color: '#3b82f6', icon: '📋' },
-        { label: 'Open Incidents', value: data.open_incidents, color: '#f59e0b', icon: '⚡' },
-        { label: 'Closed', value: data.closed_incidents, color: '#10b981', icon: '✅' },
-        { label: 'Users', value: data.total_users, color: '#8b5cf6', icon: '👥' },
-        { label: 'Equipment', value: data.total_equipment, color: '#06b6d4', icon: '📦' },
-        { label: 'Safety Rules', value: data.total_safety_rules, color: '#ef4444', icon: '🛡️' },
-        { label: 'Avg MTTD', value: data.avg_mttd_seconds != null ? `${data.avg_mttd_seconds}s` : '—', color: '#ec4899', icon: '⏱️' },
-        { label: 'Reports', value: data.total_reports, color: '#14b8a6', icon: '📊' },
+        { label: t('adminPage.dashboard.cards.totalIncidents'), value: data.total_incidents, color: '#3b82f6', icon: '📋' },
+        { label: t('adminPage.dashboard.cards.openIncidents'), value: data.open_incidents, color: '#f59e0b', icon: '⚡' },
+        { label: t('adminPage.dashboard.cards.closed'), value: data.closed_incidents, color: '#10b981', icon: '✅' },
+        { label: t('adminPage.dashboard.cards.users'), value: data.total_users, color: '#8b5cf6', icon: '👥' },
+        { label: t('adminPage.dashboard.cards.equipment'), value: data.total_equipment, color: '#06b6d4', icon: '📦' },
+        { label: t('adminPage.dashboard.cards.safetyRules'), value: data.total_safety_rules, color: '#ef4444', icon: '🛡️' },
+        { label: t('adminPage.dashboard.cards.avgMttd'), value: data.avg_mttd_seconds != null ? `${data.avg_mttd_seconds}s` : '—', color: '#ec4899', icon: '⏱️' },
+        { label: t('adminPage.dashboard.cards.reports'), value: data.total_reports, color: '#14b8a6', icon: '📊' },
     ]
 
     const fmtSec = (s) => s ? (s < 60 ? `${Math.round(s)}s` : `${(s / 60).toFixed(1)}m`) : '—'
 
     return (
         <div className="admin-section">
-            <h2 className="admin-title">Dashboard</h2>
+            <h2 className="admin-title">{t('adminPage.dashboard.title')}</h2>
             {loadError && (
                 <div className="form-error" style={{ marginBottom: 16 }}>{loadError}</div>
             )}
@@ -412,30 +423,30 @@ function DashboardSection() {
 
             {kpis && (
                 <>
-                    <h3 className="admin-subtitle" style={{ marginTop: 28 }}>Key Performance Indicators (§27)</h3>
+                    <h3 className="admin-subtitle" style={{ marginTop: 28 }}>{t('adminPage.dashboard.kpi.title')}</h3>
                     <div className="stats-grid">
                         <div className="stat-card" style={{ borderColor: '#ec4899' }}>
                             <div className="stat-icon">⏱️</div>
                             <div className="stat-value" style={{ color: '#ec4899' }}>{fmtSec(kpis.mttd?.average_seconds)}</div>
-                            <div className="stat-label">Avg MTTD</div>
-                            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Min {fmtSec(kpis.mttd?.min_seconds)} / Max {fmtSec(kpis.mttd?.max_seconds)}</div>
+                            <div className="stat-label">{t('adminPage.dashboard.kpi.avgMttd')}</div>
+                            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>{t('adminPage.dashboard.kpi.minMax', { min: fmtSec(kpis.mttd?.min_seconds), max: fmtSec(kpis.mttd?.max_seconds) })}</div>
                         </div>
                         <div className="stat-card" style={{ borderColor: '#f59e0b' }}>
                             <div className="stat-icon">📈</div>
                             <div className="stat-value" style={{ color: '#f59e0b' }}>{kpis.incidents?.escalation_rate_pct}%</div>
-                            <div className="stat-label">Escalation Rate</div>
-                            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>{kpis.incidents?.escalated} of {kpis.incidents?.total} escalated</div>
+                            <div className="stat-label">{t('adminPage.dashboard.kpi.escalationRate')}</div>
+                            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>{t('adminPage.dashboard.kpi.escalatedOfTotal', { escalated: kpis.incidents?.escalated, total: kpis.incidents?.total })}</div>
                         </div>
                         <div className="stat-card" style={{ borderColor: '#ef4444' }}>
                             <div className="stat-icon">⚠️</div>
                             <div className="stat-value" style={{ color: '#ef4444' }}>{kpis.process_failures?.detection_rate_pct}%</div>
-                            <div className="stat-label">Process Failure Rate</div>
-                            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>{kpis.process_failures?.count} of {kpis.process_failures?.total_reports} reports</div>
+                            <div className="stat-label">{t('adminPage.dashboard.kpi.processFailureRate')}</div>
+                            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>{t('adminPage.dashboard.kpi.ofReports', { count: kpis.process_failures?.count, total: kpis.process_failures?.total_reports })}</div>
                         </div>
                         <div className="stat-card" style={{ borderColor: '#10b981' }}>
                             <div className="stat-icon">✅</div>
                             <div className="stat-value" style={{ color: '#10b981' }}>{kpis.incidents?.closed}</div>
-                            <div className="stat-label">Resolved</div>
+                            <div className="stat-label">{t('adminPage.dashboard.kpi.resolved')}</div>
                         </div>
                     </div>
                 </>
@@ -447,8 +458,8 @@ function DashboardSection() {
 // ── Users ──────────────────────────────────────────────────────────
 
 // User type options: only Viewer (extra) + escalation levels added by admin (no Admin in list)
-function getUserTypeOptions(escalationLevels, currentValue) {
-    const options = [{ value: 'viewer', label: 'Viewer' }]
+function getUserTypeOptions(escalationLevels, currentValue, t) {
+    const options = [{ value: 'viewer', label: t('adminPage.users.viewer') }]
     escalationLevels.forEach(l => options.push({ value: `L${l.level}`, label: `L${l.level} – ${l.name}` }))
     // When editing, include current value so select displays correctly if it's not in the list (e.g. admin)
     if (currentValue && !options.some(o => o.value === currentValue)) {
@@ -458,6 +469,7 @@ function getUserTypeOptions(escalationLevels, currentValue) {
 }
 
 function UsersSection() {
+    const { t } = useI18n()
     const [users, setUsers] = useState([])
     const [loading, setLoading] = useState(true)
     const [showForm, setShowForm] = useState(false)
@@ -476,7 +488,7 @@ function UsersSection() {
         getEscalationMatrix().then(data => setEscalationLevels(data?.levels ?? [])).catch(() => setEscalationLevels([]))
     }, [])
 
-    const userTypeOptions = getUserTypeOptions(escalationLevels, form.user_type)
+    const userTypeOptions = getUserTypeOptions(escalationLevels, form.user_type, t)
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -484,11 +496,11 @@ function UsersSection() {
 
         const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
         if (form.email && !emailRegex.test(form.email.trim())) {
-            setError('Email is not valid  ')
+            setError(t('adminPage.users.errors.invalidEmail'))
             return
         }
         if (form.password && form.password.length < 8) {
-            setError('Password must have at least 8 characters')
+            setError(t('adminPage.users.errors.passwordMin'))
             return
         }
 
@@ -542,18 +554,18 @@ function UsersSection() {
     return (
         <div className="admin-section">
             <div className="admin-header-row">
-                <h2 className="admin-title">User Management</h2>
-                <button className="admin-btn primary" onClick={() => { setShowForm(true); setEditUser(null); setForm({ username: '', email: '', password: '', full_name: '', user_type: 'viewer' }) }}>+ Create User</button>
+                <h2 className="admin-title">{t('adminPage.users.title')}</h2>
+                <button className="admin-btn primary" onClick={() => { setShowForm(true); setEditUser(null); setForm({ username: '', email: '', password: '', full_name: '', user_type: 'viewer' }) }}>{t('adminPage.users.create')}</button>
             </div>
 
             {showForm && (
-                <Modal title={editUser ? 'Edit User' : 'Create New User'} error={error} onClose={() => { setShowForm(false); setError(''); }}>
+                <Modal title={editUser ? t('adminPage.users.modal.edit') : t('adminPage.users.modal.create')} error={error} onClose={() => { setShowForm(false); setError(''); }}>
                     <form onSubmit={handleSubmit}>
-                        {!editUser && <div className="form-group"><label>Username</label><input value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} required /></div>}
-                        <div className="form-group"><label>Email</label><input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required={!editUser} /></div>
-                        <div className="form-group"><label>Full Name</label><input value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} /></div>
-                        <div className="form-group"><label>Password {editUser && '(leave blank to keep)'}</label><input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required={!editUser} /></div>
-                        <div className="form-group"><label>User Type</label>
+                        {!editUser && <div className="form-group"><label>{t('adminPage.users.fields.username')}</label><input value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} required /></div>}
+                        <div className="form-group"><label>{t('adminPage.users.fields.email')}</label><input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required={!editUser} /></div>
+                        <div className="form-group"><label>{t('adminPage.users.fields.fullName')}</label><input value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} /></div>
+                        <div className="form-group"><label>{t('adminPage.users.fields.password')} {editUser && `(${t('adminPage.users.fields.keepBlank')})`}</label><input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required={!editUser} /></div>
+                        <div className="form-group"><label>{t('adminPage.users.fields.userType')}</label>
                             <select value={form.user_type} onChange={e => setForm({ ...form, user_type: e.target.value })}>
                                 {userTypeOptions.map(({ value, label }) => (
                                     <option key={value} value={value}>{label}</option>
@@ -561,37 +573,37 @@ function UsersSection() {
                             </select>
                         </div>
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => setShowForm(false)}>Cancel</button>
-                            <button type="submit" className="admin-btn primary">{editUser ? 'Save' : 'Create'}</button>
+                            <button type="button" className="admin-btn" onClick={() => setShowForm(false)}>{t('common.cancel')}</button>
+                            <button type="submit" className="admin-btn primary">{editUser ? t('common.save') : t('common.create')}</button>
                         </div>
                     </form>
                 </Modal>
             )}
 
             {confirmAction && (
-                <Modal title={confirmAction.action === 'activate' ? 'Activate User' : 'Deactivate User'} onClose={() => setConfirmAction(null)}>
+                <Modal title={confirmAction.action === 'activate' ? t('adminPage.users.actions.activateUser') : t('adminPage.users.actions.deactivateUser')} onClose={() => setConfirmAction(null)}>
                     <div style={{ padding: '0 10px 10px 10px' }}>
                         <p style={{ margin: '0 0 20px 0', fontSize: '15px' }}>
-                            Are you sure you want to {confirmAction.action} user <strong>{confirmAction.user.username}</strong>?
+                            {t('adminPage.users.confirm', { action: confirmAction.action === 'activate' ? t('common.activate') : t('common.deactivate'), username: confirmAction.user.username })}
                         </p>
                         <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                            <button className="admin-btn" onClick={() => setConfirmAction(null)}>Cancel</button>
+                            <button className="admin-btn" onClick={() => setConfirmAction(null)}>{t('common.cancel')}</button>
                             <button
                                 className={`admin-btn ${confirmAction.action === 'activate' ? 'success' : 'danger'}`}
                                 onClick={confirmExecute}
                                 style={confirmAction.action === 'activate' ? { background: '#10b981', color: 'white', border: 'none' } : {}}
                             >
-                                {confirmAction.action === 'activate' ? 'Activate' : 'Deactivate'}
+                                {confirmAction.action === 'activate' ? t('common.activate') : t('common.deactivate')}
                             </button>
                         </div>
                     </div>
                 </Modal>
             )}
 
-            {loading ? <div className="admin-loading">Loading users...</div> : (
+            {loading ? <div className="admin-loading">{t('adminPage.users.loading')}</div> : (
                 <div className="admin-table-wrap">
                     <table className="admin-table">
-                        <thead><tr><th>Username</th><th>Full Name</th><th>Email</th><th>Type</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+                        <thead><tr><th>{t('adminPage.users.table.username')}</th><th>{t('adminPage.users.table.fullName')}</th><th>{t('adminPage.users.table.email')}</th><th>{t('adminPage.users.table.type')}</th><th>{t('adminPage.users.table.status')}</th><th>{t('adminPage.users.table.created')}</th><th>{t('adminPage.users.table.actions')}</th></tr></thead>
                         <tbody>
                             {users.map(u => (
                                 <tr key={u.id} className={!u.is_active ? 'inactive-row' : ''}>
@@ -599,14 +611,14 @@ function UsersSection() {
                                     <td>{u.full_name || '—'}</td>
                                     <td>{u.email}</td>
                                     <td><span className="user-type-badge" style={{ background: userTypeColor(u.user_type) }}>{u.user_type}</span></td>
-                                    <td><span className={`status-badge ${u.is_active ? 'active' : 'inactive'}`}>{u.is_active ? 'Active' : 'Inactive'}</span></td>
+                                    <td><span className={`status-badge ${u.is_active ? 'active' : 'inactive'}`}>{u.is_active ? t('common.active') : t('common.inactive')}</span></td>
                                     <td>{new Date(u.created_at).toLocaleDateString()}</td>
                                     <td>
-                                        <button className="admin-btn-sm" onClick={() => handleEdit(u)}>Edit</button>
+                                        <button className="admin-btn-sm" onClick={() => handleEdit(u)}>{t('common.edit')}</button>
                                         {u.is_active ? (
-                                            <button className="admin-btn-sm danger" style={{ marginLeft: '6px' }} onClick={() => handleDelete(u)}>Deactivate</button>
+                                            <button className="admin-btn-sm danger" style={{ marginInlineStart: '6px' }} onClick={() => handleDelete(u)}>{t('common.deactivate')}</button>
                                         ) : (
-                                            <button className="admin-btn-sm" style={{ marginLeft: '6px' }} onClick={() => handleActivate(u)}> Activate </button>
+                                            <button className="admin-btn-sm" style={{ marginInlineStart: '6px' }} onClick={() => handleActivate(u)}>{t('common.activate')}</button>
                                         )}
                                     </td>
                                 </tr>
@@ -622,6 +634,7 @@ function UsersSection() {
 // ── Incidents ──────────────────────────────────────────────────────
 
 function IncidentsSection() {
+    const { t } = useI18n()
     const [incidents, setIncidents] = useState([])
     const [loading, setLoading] = useState(true)
     const [filterEscalatedOnly, setFilterEscalatedOnly] = useState(false)
@@ -650,29 +663,36 @@ function IncidentsSection() {
         if (s === 'OPEN' || s === 'DIAGNOSIS_LOOP') return '#f59e0b'
         return '#6b7280'
     }
+    const statusLabel = (s) => {
+        if (s === 'CLOSED') return t('adminPage.incidents.status.closed')
+        if (s === 'ESCALATED') return t('adminPage.incidents.status.escalated')
+        if (s === 'OPEN') return t('adminPage.incidents.status.open')
+        if (s === 'DIAGNOSIS_LOOP') return t('adminPage.incidents.status.diagnosis')
+        return s
+    }
 
     const filtered = filterEscalatedOnly ? incidents.filter(i => i.status === 'ESCALATED') : incidents
 
     return (
         <div className="admin-section">
             <div className="admin-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>
-                <h2 className="admin-title">Incidents</h2>
+                <h2 className="admin-title">{t('adminPage.incidents.title')}</h2>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-dim)' }}>
                     <input
                         type="checkbox"
                         checked={filterEscalatedOnly}
                         onChange={e => setFilterEscalatedOnly(e.target.checked)}
                     />
-                    Escalated only
+                    {t('adminPage.incidents.escalatedOnly')}
                 </label>
             </div>
-            {loading ? <div className="admin-loading">Loading...</div> : (
+            {loading ? <div className="admin-loading">{t('common.loading')}</div> : (
                 <div className="admin-table-wrap">
                     <table className="admin-table">
-                        <thead><tr><th>ID</th><th>Summary</th><th>Asset</th><th>Severity</th><th>Status</th><th>Confidence</th><th>Risk</th><th></th></tr></thead>
+                        <thead><tr><th>{t('adminPage.incidents.table.id')}</th><th>{t('adminPage.incidents.table.summary')}</th><th>{t('adminPage.incidents.table.asset')}</th><th>{t('adminPage.incidents.table.severity')}</th><th>{t('adminPage.incidents.table.status')}</th><th>{t('adminPage.incidents.table.confidence')}</th><th>{t('adminPage.incidents.table.risk')}</th><th></th></tr></thead>
                         <tbody>
                             {filtered.length === 0 ? (
-                                <tr><td colSpan={8} className="td-empty">{filterEscalatedOnly ? 'No escalated incidents' : 'No incidents yet'}</td></tr>
+                                <tr><td colSpan={8} className="td-empty">{filterEscalatedOnly ? t('adminPage.incidents.empty.escalatedOnly') : t('adminPage.incidents.empty.none')}</td></tr>
                             ) : filtered.map((inc, i) => (
                                 <tr
                                     key={i}
@@ -684,10 +704,10 @@ function IncidentsSection() {
                                     <td>{inc.summary?.slice(0, 50) || '—'}</td>
                                     <td className="td-bold">{inc.asset_id || '—'}</td>
                                     <td><span className={`badge badge-${inc.severity || 'medium'}`}>{inc.severity}</span></td>
-                                    <td><span style={{ color: statusColor(inc.status), fontWeight: 600 }}>{inc.status}</span></td>
+                                    <td><span style={{ color: statusColor(inc.status), fontWeight: 600 }}>{statusLabel(inc.status)}</span></td>
                                     <td>{Math.round((inc.confidence || 0) * 100)}%</td>
                                     <td>{inc.risk_score?.toFixed(1) || '—'}</td>
-                                    <td><span style={{ fontSize: 11, color: 'var(--text-dim)' }}>View →</span></td>
+                                    <td><span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{t('adminPage.incidents.view')}</span></td>
                                 </tr>
                             ))}
                         </tbody>
@@ -696,11 +716,11 @@ function IncidentsSection() {
             )}
 
             {selectedId && (
-                <Modal title="Incident details" onClose={() => setSelectedId(null)}>
+                <Modal title={t('adminPage.incidents.details.title')} onClose={() => setSelectedId(null)}>
                     {detailLoading ? (
-                        <div className="admin-loading">Loading incident...</div>
+                        <div className="admin-loading">{t('adminPage.incidents.details.loading')}</div>
                     ) : !detail ? (
-                        <div className="admin-loading">Could not load incident.</div>
+                        <div className="admin-loading">{t('adminPage.incidents.details.loadFailed')}</div>
                     ) : (
                         <IncidentDetailContent detail={detail} onClose={() => setSelectedId(null)} />
                     )}
@@ -711,6 +731,7 @@ function IncidentsSection() {
 }
 
 function IncidentDetailContent({ detail, onClose }) {
+    const { t } = useI18n()
     const card = detail.incident_card || {}
     const esc = detail.escalation || {}
     const brief = detail.decision_brief || {}
@@ -722,13 +743,13 @@ function IncidentDetailContent({ detail, onClose }) {
             <div style={{ marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
                 <div style={{ fontSize: 14, color: 'var(--text-bright)', fontWeight: 600, marginBottom: 8 }}>{card.normalized_summary || '—'}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 24px', fontSize: 12, color: 'var(--text-dim)' }}>
-                    <span><strong>ID:</strong> {detail.incident_id}</span>
-                    <span><strong>Asset:</strong> {card.asset_id || '—'}</span>
-                    <span><strong>Severity:</strong> <span className={`badge badge-${card.severity || 'medium'}`}>{card.severity}</span></span>
-                    <span><strong>Status:</strong> <span style={{ color: isEscalated ? '#ef4444' : '#10b981', fontWeight: 600 }}>{detail.status}</span></span>
-                    <span><strong>Risk:</strong> {detail.risk_score?.toFixed(1) ?? '—'}</span>
-                    <span><strong>Confidence:</strong> {Math.round((detail.confidence || 0) * 100)}%</span>
-                    {detail.failed_attempts > 0 && <span><strong>Failed attempts:</strong> {detail.failed_attempts}</span>}
+                    <span><strong>{t('adminPage.incidents.table.id')}:</strong> {detail.incident_id}</span>
+                    <span><strong>{t('adminPage.incidents.table.asset')}:</strong> {card.asset_id || '—'}</span>
+                    <span><strong>{t('adminPage.incidents.table.severity')}:</strong> <span className={`badge badge-${card.severity || 'medium'}`}>{card.severity}</span></span>
+                    <span><strong>{t('adminPage.incidents.table.status')}:</strong> <span style={{ color: isEscalated ? '#ef4444' : '#10b981', fontWeight: 600 }}>{detail.status}</span></span>
+                    <span><strong>{t('adminPage.incidents.table.risk')}:</strong> {detail.risk_score?.toFixed(1) ?? '—'}</span>
+                    <span><strong>{t('adminPage.incidents.table.confidence')}:</strong> {Math.round((detail.confidence || 0) * 100)}%</span>
+                    {detail.failed_attempts > 0 && <span><strong>{t('adminPage.incidents.details.failedAttempts')}:</strong> {detail.failed_attempts}</span>}
                 </div>
             </div>
 
@@ -738,12 +759,12 @@ function IncidentDetailContent({ detail, onClose }) {
                     marginBottom: 20, padding: 16, background: 'rgba(239,68,68,0.08)', border: '1px solid #ef4444',
                     borderRadius: 8,
                 }}>
-                    <h3 style={{ color: '#ef4444', fontSize: 14, fontWeight: 700, marginBottom: 12 }}>🔴 Escalation detail</h3>
+                    <h3 style={{ color: '#ef4444', fontSize: 14, fontWeight: 700, marginBottom: 12 }}>🔴 {t('adminPage.incidents.details.escalationDetail')}</h3>
 
                     {detail.escalation_reasons?.length > 0 && (
                         <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>Reasons</div>
-                            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>{t('adminPage.incidents.details.reasons')}</div>
+                            <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 13 }}>
                                 {detail.escalation_reasons.map((r, i) => <li key={i}>{r}</li>)}
                             </ul>
                         </div>
@@ -751,30 +772,30 @@ function IncidentDetailContent({ detail, onClose }) {
 
                     {(esc.escalation_level != null || esc.escalation_level_name) && (
                         <div style={{ marginBottom: 8, fontSize: 13 }}>
-                            <strong>Level:</strong> {esc.escalation_level} — {esc.escalation_level_name}
+                            <strong>{t('adminPage.incidents.details.level')}:</strong> {esc.escalation_level} — {esc.escalation_level_name}
                         </div>
                     )}
                     {esc.escalation_summary && <div style={{ marginBottom: 8, fontSize: 13 }}>{esc.escalation_summary}</div>}
-                    {esc.urgency && <div style={{ marginBottom: 8, fontSize: 12, color: '#f59e0b' }}>Urgency: {esc.urgency}</div>}
-                    {esc.recommended_expertise && <div style={{ marginBottom: 8, fontSize: 12 }}>Recommended expertise: {esc.recommended_expertise}</div>}
+                    {esc.urgency && <div style={{ marginBottom: 8, fontSize: 12, color: '#f59e0b' }}>{t('adminPage.incidents.details.urgency')}: {esc.urgency}</div>}
+                    {esc.recommended_expertise && <div style={{ marginBottom: 8, fontSize: 12 }}>{t('adminPage.incidents.details.recommendedExpertise')}: {esc.recommended_expertise}</div>}
 
                     {esc.what_was_tried?.length > 0 && (
                         <div style={{ marginTop: 10 }}>
-                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>What was tried</div>
-                            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>{esc.what_was_tried.map((w, i) => <li key={i}>{w}</li>)}</ul>
+                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>{t('adminPage.incidents.details.whatWasTried')}</div>
+                            <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 12 }}>{esc.what_was_tried.map((w, i) => <li key={i}>{w}</li>)}</ul>
                         </div>
                     )}
                     {esc.safety_warnings?.length > 0 && (
                         <div style={{ marginTop: 10 }}>
-                            <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 4 }}>Safety warnings</div>
-                            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>{esc.safety_warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+                            <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 4 }}>{t('adminPage.incidents.details.safetyWarnings')}</div>
+                            <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 12 }}>{esc.safety_warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
                         </div>
                     )}
 
                     {detail.escalation?.session_id && (
                         <div style={{ marginTop: 12, padding: 10, background: 'var(--surface)', borderRadius: 6, fontSize: 12 }}>
-                            <strong>💬 Escalation chat</strong> — Session ID: <code style={{ fontSize: 11 }}>{detail.escalation.session_id}</code>
-                            <div style={{ color: 'var(--text-dim)', marginTop: 6 }}>Supervisors can join this conversation from the <strong>Shift Manager Console</strong> (log in as an escalation-level user).</div>
+                            <strong>💬 {t('adminPage.incidents.details.escalationChat')}</strong> — {t('adminPage.incidents.details.sessionId')}: <code style={{ fontSize: 11 }}>{detail.escalation.session_id}</code>
+                            <div style={{ color: 'var(--text-dim)', marginTop: 6 }}>{t('adminPage.incidents.details.supervisorHelp')}</div>
                         </div>
                     )}
                 </div>
@@ -783,11 +804,11 @@ function IncidentDetailContent({ detail, onClose }) {
             {/* Decision brief summary */}
             {brief.risk_summary && (
                 <div style={{ marginBottom: 16, padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
-                    <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Decision brief</h3>
+                    <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{t('adminPage.incidents.details.decisionBrief')}</h3>
                     <div style={{ fontSize: 13, marginBottom: 8 }}>{brief.risk_summary}</div>
                     {brief.options?.length > 0 && (
                         <div style={{ fontSize: 12 }}>
-                            <span style={{ color: 'var(--text-dim)' }}>Options: </span>
+                            <span style={{ color: 'var(--text-dim)' }}>{t('adminPage.incidents.details.options')}: </span>
                             {brief.options.map((o, i) => <span key={i}>{o.title}{i < brief.options.length - 1 ? '; ' : ''}</span>)}
                         </div>
                     )}
@@ -798,7 +819,7 @@ function IncidentDetailContent({ detail, onClose }) {
             )}
 
             <div style={{ textAlign: 'right' }}>
-                <button type="button" className="admin-btn" onClick={onClose}>Close</button>
+                <button type="button" className="admin-btn" onClick={onClose}>{t('common.close')}</button>
             </div>
         </div>
     )
@@ -807,6 +828,7 @@ function IncidentDetailContent({ detail, onClose }) {
 // ── Equipment (CRUD) ───────────────────────────────────────────────
 
 function EquipmentSection({ openCreateNonce, prefillId }) {
+    const { t } = useI18n()
     const [equipment, setEquipment] = useState([])
     const [loading, setLoading] = useState(true)
     const [showForm, setShowForm] = useState(false)
@@ -866,7 +888,7 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
     }
 
     const handleDelete = async (eq) => {
-        if (!confirm(`Delete equipment "${eq.id}"?`)) return
+        if (!confirm(t('adminPage.equipment.confirmDelete', { id: eq.id }))) return
         try { await deleteEquipment(eq.id); load() } catch (err) { alert(err.message) }
     }
 
@@ -875,48 +897,48 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
     return (
         <div className="admin-section">
             <div className="admin-header-row">
-                <h2 className="admin-title">Equipment Registry</h2>
-                <button className="admin-btn primary" onClick={() => openCreate('')}>+ Add Equipment</button>
+                <h2 className="admin-title">{t('adminPage.equipment.title')}</h2>
+                <button className="admin-btn primary" onClick={() => openCreate('')}>{t('adminPage.equipment.add')}</button>
             </div>
 
             {showForm && (
-                <Modal title={editItem ? `Edit ${editItem.id}` : 'Add Equipment'} error={error} onClose={() => { setShowForm(false); setError(''); }}>
+                <Modal title={editItem ? t('adminPage.equipment.editTitle', { id: editItem.id }) : t('adminPage.equipment.addTitle')} error={error} onClose={() => { setShowForm(false); setError(''); }}>
                     <form onSubmit={handleSubmit}>
-                        {!editItem && <div className="form-group"><label>Equipment ID</label><input value={form.id} onChange={e => setForm({ ...form, id: e.target.value })} placeholder="e.g. CMP-02" required /></div>}
-                        <div className="form-group"><label>Name</label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
-                        <div className="form-group"><label>Type</label>
+                        {!editItem && <div className="form-group"><label>{t('adminPage.equipment.fields.id')}</label><input value={form.id} onChange={e => setForm({ ...form, id: e.target.value })} placeholder="e.g. CMP-02" required /></div>}
+                        <div className="form-group"><label>{t('adminPage.equipment.fields.name')}</label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
+                        <div className="form-group"><label>{t('adminPage.equipment.fields.type')}</label>
                             <select value={form.equipment_type} onChange={e => setForm({ ...form, equipment_type: e.target.value })}>
-                                <option value="rotating">Rotating</option><option value="pressure_vessel">Pressure Vessel</option>
-                                <option value="heat_exchange">Heat Exchange</option><option value="storage">Storage</option>
-                                <option value="piping">Piping</option><option value="electrical">Electrical</option>
+                                <option value="rotating">{t('adminPage.equipment.types.rotating')}</option><option value="pressure_vessel">{t('adminPage.equipment.types.pressure_vessel')}</option>
+                                <option value="heat_exchange">{t('adminPage.equipment.types.heat_exchange')}</option><option value="storage">{t('adminPage.equipment.types.storage')}</option>
+                                <option value="piping">{t('adminPage.equipment.types.piping')}</option><option value="electrical">{t('adminPage.equipment.types.electrical')}</option>
                             </select>
                         </div>
                         <div className="form-row">
-                            <div className="form-group"><label>Process Line</label><input value={form.process_line} onChange={e => setForm({ ...form, process_line: e.target.value })} /></div>
-                            <div className="form-group"><label>Criticality</label>
+                            <div className="form-group"><label>{t('adminPage.equipment.fields.line')}</label><input value={form.process_line} onChange={e => setForm({ ...form, process_line: e.target.value })} /></div>
+                            <div className="form-group"><label>{t('adminPage.equipment.fields.criticality')}</label>
                                 <select value={form.criticality} onChange={e => setForm({ ...form, criticality: e.target.value })}>
-                                    <option value="critical">Critical</option><option value="high">High</option>
-                                    <option value="medium">Medium</option><option value="low">Low</option>
+                                    <option value="critical">{t('adminPage.equipment.criticality.critical')}</option><option value="high">{t('adminPage.equipment.criticality.high')}</option>
+                                    <option value="medium">{t('adminPage.equipment.criticality.medium')}</option><option value="low">{t('adminPage.equipment.criticality.low')}</option>
                                 </select>
                             </div>
                         </div>
-                        <div className="form-group"><label>Description</label><input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+                        <div className="form-group"><label>{t('adminPage.equipment.fields.description')}</label><input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
                         <div className="form-row">
-                            <div className="form-group"><label>Upstream ID</label><input value={form.upstream_id} onChange={e => setForm({ ...form, upstream_id: e.target.value })} placeholder="e.g. CMP-01" /></div>
-                            <div className="form-group"><label>Downstream ID</label><input value={form.downstream_id} onChange={e => setForm({ ...form, downstream_id: e.target.value })} placeholder="e.g. CON-01" /></div>
+                            <div className="form-group"><label>{t('adminPage.equipment.fields.upstream')}</label><input value={form.upstream_id} onChange={e => setForm({ ...form, upstream_id: e.target.value })} placeholder="e.g. CMP-01" /></div>
+                            <div className="form-group"><label>{t('adminPage.equipment.fields.downstream')}</label><input value={form.downstream_id} onChange={e => setForm({ ...form, downstream_id: e.target.value })} placeholder="e.g. CON-01" /></div>
                         </div>
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => setShowForm(false)}>Cancel</button>
-                            <button type="submit" className="admin-btn primary">{editItem ? 'Save' : 'Add'}</button>
+                            <button type="button" className="admin-btn" onClick={() => setShowForm(false)}>{t('common.cancel')}</button>
+                            <button type="submit" className="admin-btn primary">{editItem ? t('common.save') : t('common.add')}</button>
                         </div>
                     </form>
                 </Modal>
             )}
 
-            {loading ? <div className="admin-loading">Loading...</div> : (
+            {loading ? <div className="admin-loading">{t('common.loading')}</div> : (
                 <div className="admin-table-wrap">
                     <table className="admin-table">
-                        <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Line</th><th>Criticality</th><th>Upstream</th><th>Downstream</th><th>Actions</th></tr></thead>
+                        <thead><tr><th>{t('adminPage.equipment.table.id')}</th><th>{t('adminPage.equipment.table.name')}</th><th>{t('adminPage.equipment.table.type')}</th><th>{t('adminPage.equipment.table.line')}</th><th>{t('adminPage.equipment.table.criticality')}</th><th>{t('adminPage.equipment.table.upstream')}</th><th>{t('adminPage.equipment.table.downstream')}</th><th>{t('adminPage.equipment.table.actions')}</th></tr></thead>
                         <tbody>
                             {equipment.map(eq => (
                                 <tr key={eq.id}>
@@ -928,8 +950,8 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
                                     <td>{eq.upstream_id || '—'}</td>
                                     <td>{eq.downstream_id || '—'}</td>
                                     <td>
-                                        <button className="admin-btn-sm" onClick={() => openEdit(eq)}>Edit</button>
-                                        <button className="admin-btn-sm danger" onClick={() => handleDelete(eq)}>Delete</button>
+                                        <button className="admin-btn-sm" onClick={() => openEdit(eq)}>{t('common.edit')}</button>
+                                        <button className="admin-btn-sm danger" onClick={() => handleDelete(eq)}>{t('common.delete')}</button>
                                     </td>
                                 </tr>
                             ))}
@@ -944,6 +966,7 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
 // ── Safety Rules (CRUD) ────────────────────────────────────────────
 
 function SafetySection() {
+    const { t } = useI18n()
     const [rules, setRules] = useState([])
     const [loading, setLoading] = useState(true)
     const [showForm, setShowForm] = useState(false)
@@ -986,48 +1009,48 @@ function SafetySection() {
     }
 
     const handleDelete = async (r) => {
-        if (!confirm(`Delete safety rule #${r.id}?`)) return
+        if (!confirm(t('adminPage.safety.confirmDelete', { id: r.id }))) return
         try { await deleteSafetyRule(r.id); load() } catch (err) { alert(err.message) }
     }
 
     return (
         <div className="admin-section">
             <div className="admin-header-row">
-                <h2 className="admin-title">Safety Rules</h2>
-                <button className="admin-btn primary" onClick={openCreate}>+ Add Rule</button>
+                <h2 className="admin-title">{t('adminPage.safety.title')}</h2>
+                <button className="admin-btn primary" onClick={openCreate}>{t('adminPage.safety.addRule')}</button>
             </div>
 
             {showForm && (
-                <Modal title={editItem ? `Edit Rule #${editItem.id}` : 'Add Safety Rule'} error={error} onClose={() => { setShowForm(false); setError(''); }}>
+                <Modal title={editItem ? t('adminPage.safety.editRule', { id: editItem.id }) : t('adminPage.safety.addRuleTitle')} error={error} onClose={() => { setShowForm(false); setError(''); }}>
                     <form onSubmit={handleSubmit}>
-                        <div className="form-group"><label>Type</label>
+                        <div className="form-group"><label>{t('adminPage.safety.table.type')}</label>
                             <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} required>
                                 {safetyTypeOptions.map(t => (
                                     <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
                                 ))}
                             </select>
                         </div>
-                        <div className="form-group"><label>Rule</label><input value={form.rule} onChange={e => setForm({ ...form, rule: e.target.value })} placeholder="Rule text" required /></div>
+                        <div className="form-group"><label>{t('adminPage.safety.table.rule')}</label><input value={form.rule} onChange={e => setForm({ ...form, rule: e.target.value })} placeholder={t('adminPage.safety.rulePlaceholder')} required /></div>
                         <div className="form-actions">
-                            <button type="button" className="admin-btn" onClick={() => setShowForm(false)}>Cancel</button>
-                            <button type="submit" className="admin-btn primary">{editItem ? 'Save' : 'Add'}</button>
+                            <button type="button" className="admin-btn" onClick={() => setShowForm(false)}>{t('common.cancel')}</button>
+                            <button type="submit" className="admin-btn primary">{editItem ? t('common.save') : t('common.add')}</button>
                         </div>
                     </form>
                 </Modal>
             )}
 
-            {loading ? <div className="admin-loading">Loading...</div> : (
+            {loading ? <div className="admin-loading">{t('common.loading')}</div> : (
                 <div className="admin-table-wrap">
                     <table className="admin-table">
-                        <thead><tr><th>Type</th><th>Rule</th><th>Actions</th></tr></thead>
+                        <thead><tr><th>{t('adminPage.safety.table.type')}</th><th>{t('adminPage.safety.table.rule')}</th><th>{t('adminPage.safety.table.actions')}</th></tr></thead>
                         <tbody>
                             {rules.map(r => (
                                 <tr key={r.id}>
                                     <td className="td-bold">{r.equipment_type}</td>
                                     <td>{r.rule_text}</td>
                                     <td>
-                                        <button className="admin-btn-sm" onClick={() => openEdit(r)}>Edit</button>
-                                        <button className="admin-btn-sm danger" onClick={() => handleDelete(r)}>Delete</button>
+                                        <button className="admin-btn-sm" onClick={() => openEdit(r)}>{t('common.edit')}</button>
+                                        <button className="admin-btn-sm danger" onClick={() => handleDelete(r)}>{t('common.delete')}</button>
                                     </td>
                                 </tr>
                             ))}
@@ -1042,6 +1065,7 @@ function SafetySection() {
 // ── Escalation (CRUD) ──────────────────────────────────────────────
 
 function EscalationSection() {
+    const { t } = useI18n()
     const [data, setData] = useState(null)
     const [loading, setLoading] = useState(true)
     const [showLevelForm, setShowLevelForm] = useState(false)
@@ -1067,7 +1091,7 @@ function EscalationSection() {
         } catch (err) { setError(err.message) }
     }
     const removeLevel = async (l) => {
-        if (!confirm(`Delete level ${l.level}?`)) return
+        if (!confirm(t('adminPage.escalation.confirmDeleteLevel', { level: l.level }))) return
         try { await deleteEscalationLevel(l.level); load() } catch (err) { alert(err.message) }
     }
 
@@ -1083,7 +1107,7 @@ function EscalationSection() {
         } catch (err) { setError(err.message) }
     }
     const removeRule = async (r) => {
-        if (!confirm(`Delete rule #${r.id}?`)) return
+        if (!confirm(t('adminPage.escalation.confirmDeleteRule', { id: r.id }))) return
         try { await deleteEscalationRule(r.id); load() } catch (err) { alert(err.message) }
     }
 
@@ -1094,31 +1118,31 @@ function EscalationSection() {
 
     return (
         <div className="admin-section">
-            <h2 className="admin-title">Escalation Matrix</h2>
-            {loading ? <div className="admin-loading">Loading...</div> : (
+            <h2 className="admin-title">{t('adminPage.escalation.title')}</h2>
+            {loading ? <div className="admin-loading">{t('common.loading')}</div> : (
                 <>
                     {/* Levels */}
                     <div className="admin-header-row" style={{ marginBottom: 12 }}>
-                        <h3 className="admin-subtitle">Levels</h3>
-                        <button className="admin-btn primary" onClick={openCreateLevel}>+ Add Level</button>
+                        <h3 className="admin-subtitle">{t('adminPage.escalation.levels')}</h3>
+                        <button className="admin-btn primary" onClick={openCreateLevel}>{t('adminPage.escalation.addLevel')}</button>
                     </div>
 
                     {showLevelForm && (
-                        <Modal title={editLevel ? `Edit Level ${editLevel.level}` : 'Add Escalation Level'} error={error} onClose={() => { setShowLevelForm(false); setError(''); }}>
+                        <Modal title={editLevel ? t('adminPage.escalation.editLevel', { level: editLevel.level }) : t('adminPage.escalation.addLevelTitle')} error={error} onClose={() => { setShowLevelForm(false); setError(''); }}>
                             <form onSubmit={submitLevel}>
-                                {!editLevel && <div className="form-group"><label>Level Number</label><input type="number" value={levelForm.level} onChange={e => setLevelForm({ ...levelForm, level: parseInt(e.target.value) })} required /></div>}
-                                <div className="form-group"><label>Name</label><input value={levelForm.name} onChange={e => setLevelForm({ ...levelForm, name: e.target.value })} placeholder="e.g. Field Supervisor" required /></div>
-                                <div className="form-group"><label>Description</label><input value={levelForm.description} onChange={e => setLevelForm({ ...levelForm, description: e.target.value })} /></div>
+                                {!editLevel && <div className="form-group"><label>{t('adminPage.escalation.levelNumber')}</label><input type="number" value={levelForm.level} onChange={e => setLevelForm({ ...levelForm, level: parseInt(e.target.value) })} required /></div>}
+                                <div className="form-group"><label>{t('common.name')}</label><input value={levelForm.name} onChange={e => setLevelForm({ ...levelForm, name: e.target.value })} placeholder={t('adminPage.escalation.levelNamePlaceholder')} required /></div>
+                                <div className="form-group"><label>{t('common.description')}</label><input value={levelForm.description} onChange={e => setLevelForm({ ...levelForm, description: e.target.value })} /></div>
                                 <div className="form-actions">
-                                    <button type="button" className="admin-btn" onClick={() => setShowLevelForm(false)}>Cancel</button>
-                                    <button type="submit" className="admin-btn primary">{editLevel ? 'Save' : 'Add'}</button>
+                                    <button type="button" className="admin-btn" onClick={() => setShowLevelForm(false)}>{t('common.cancel')}</button>
+                                    <button type="submit" className="admin-btn primary">{editLevel ? t('common.save') : t('common.add')}</button>
                                 </div>
                             </form>
                         </Modal>
                     )}
 
                     {levels.length === 0 ? (
-                        <div className="admin-loading">No escalation levels yet. Click "+ Add Level" to create one.</div>
+                        <div className="admin-loading">{t('adminPage.escalation.emptyLevels')}</div>
                     ) : (
                         <div className="escalation-levels">
                             {levels.map(l => (
@@ -1127,8 +1151,8 @@ function EscalationSection() {
                                     <div className="esc-level-name">{l.name}</div>
                                     <div className="esc-level-desc">{l.description}</div>
                                     <div className="esc-level-actions">
-                                        <button className="admin-btn-sm" onClick={() => openEditLevel(l)}>Edit</button>
-                                        <button className="admin-btn-sm danger" onClick={() => removeLevel(l)}>Delete</button>
+                                        <button className="admin-btn-sm" onClick={() => openEditLevel(l)}>{t('common.edit')}</button>
+                                        <button className="admin-btn-sm danger" onClick={() => removeLevel(l)}>{t('common.delete')}</button>
                                     </div>
                                 </div>
                             ))}
@@ -1137,48 +1161,48 @@ function EscalationSection() {
 
                     {/* Rules */}
                     <div className="admin-header-row" style={{ marginTop: 24, marginBottom: 12 }}>
-                        <h3 className="admin-subtitle">Rules</h3>
-                        <button className="admin-btn primary" onClick={openCreateRule}>+ Add Rule</button>
+                        <h3 className="admin-subtitle">{t('adminPage.escalation.rules')}</h3>
+                        <button className="admin-btn primary" onClick={openCreateRule}>{t('adminPage.escalation.addRule')}</button>
                     </div>
 
                     {showRuleForm && (
-                        <Modal title={editRule ? `Edit Rule #${editRule.id}` : 'Add Escalation Rule'} error={error} onClose={() => { setShowRuleForm(false); setError(''); }}>
+                        <Modal title={editRule ? t('adminPage.escalation.editRule', { id: editRule.id }) : t('adminPage.escalation.addRuleTitle')} error={error} onClose={() => { setShowRuleForm(false); setError(''); }}>
                             <form onSubmit={submitRule}>
-                                <div className="form-group"><label>Condition</label><input value={ruleForm.condition} onChange={e => setRuleForm({ ...ruleForm, condition: e.target.value })} placeholder="e.g. high_risk_low_confidence" required /></div>
+                                <div className="form-group"><label>{t('adminPage.escalation.table.condition')}</label><input value={ruleForm.condition} onChange={e => setRuleForm({ ...ruleForm, condition: e.target.value })} placeholder={t('adminPage.escalation.conditionPlaceholder')} required /></div>
                                 <div className="form-row">
-                                    <div className="form-group"><label>Confidence Min</label><input type="number" step="0.01" min="0" max="1" value={ruleForm.confidence_min} onChange={e => setRuleForm({ ...ruleForm, confidence_min: parseFloat(e.target.value) })} /></div>
-                                    <div className="form-group"><label>Confidence Max</label><input type="number" step="0.01" min="0" max="1" value={ruleForm.confidence_max} onChange={e => setRuleForm({ ...ruleForm, confidence_max: parseFloat(e.target.value) })} /></div>
+                                    <div className="form-group"><label>{t('adminPage.escalation.confidenceMin')}</label><input type="number" step="0.01" min="0" max="1" value={ruleForm.confidence_min} onChange={e => setRuleForm({ ...ruleForm, confidence_min: parseFloat(e.target.value) })} /></div>
+                                    <div className="form-group"><label>{t('adminPage.escalation.confidenceMax')}</label><input type="number" step="0.01" min="0" max="1" value={ruleForm.confidence_max} onChange={e => setRuleForm({ ...ruleForm, confidence_max: parseFloat(e.target.value) })} /></div>
                                 </div>
                                 <div className="form-row">
-                                    <div className="form-group"><label>Safety Impact</label>
+                                    <div className="form-group"><label>{t('adminPage.escalation.table.impact')}</label>
                                         <select value={ruleForm.safety_impact} onChange={e => setRuleForm({ ...ruleForm, safety_impact: e.target.value })}>
-                                            <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+                                            <option value="low">{t('common.low')}</option><option value="medium">{t('common.medium')}</option><option value="high">{t('common.high')}</option>
                                         </select>
                                     </div>
-                                    <div className="form-group"><label>Escalation Level</label>
+                                    <div className="form-group"><label>{t('adminPage.escalation.table.level')}</label>
                                         <select value={ruleForm.escalation_level} onChange={e => setRuleForm({ ...ruleForm, escalation_level: parseInt(e.target.value, 10) })}>
-                                            <option value={0}>0 – No escalation</option>
+                                            <option value={0}>{t('adminPage.escalation.noEscalation')}</option>
                                             {(levels || []).map(l => (
                                                 <option key={l.level} value={l.level}>L{l.level} – {l.name}</option>
                                             ))}
                                         </select>
                                     </div>
                                 </div>
-                                <div className="form-group"><label>Description</label><input value={ruleForm.description} onChange={e => setRuleForm({ ...ruleForm, description: e.target.value })} /></div>
+                                <div className="form-group"><label>{t('common.description')}</label><input value={ruleForm.description} onChange={e => setRuleForm({ ...ruleForm, description: e.target.value })} /></div>
                                 <div className="form-actions">
-                                    <button type="button" className="admin-btn" onClick={() => setShowRuleForm(false)}>Cancel</button>
-                                    <button type="submit" className="admin-btn primary">{editRule ? 'Save' : 'Add'}</button>
+                                    <button type="button" className="admin-btn" onClick={() => setShowRuleForm(false)}>{t('common.cancel')}</button>
+                                    <button type="submit" className="admin-btn primary">{editRule ? t('common.save') : t('common.add')}</button>
                                 </div>
                             </form>
                         </Modal>
                     )}
 
                     {rules.length === 0 ? (
-                        <div className="admin-loading">No escalation rules yet. Click "+ Add Rule" to create one.</div>
+                        <div className="admin-loading">{t('adminPage.escalation.emptyRules')}</div>
                     ) : (
                         <div className="admin-table-wrap">
                             <table className="admin-table">
-                                <thead><tr><th>ID</th><th>Condition</th><th>Confidence</th><th>Impact</th><th>Level</th><th>Description</th><th>Actions</th></tr></thead>
+                                <thead><tr><th>{t('adminPage.escalation.table.id')}</th><th>{t('adminPage.escalation.table.condition')}</th><th>{t('adminPage.escalation.table.confidence')}</th><th>{t('adminPage.escalation.table.impact')}</th><th>{t('adminPage.escalation.table.level')}</th><th>{t('adminPage.escalation.table.description')}</th><th>{t('adminPage.escalation.table.actions')}</th></tr></thead>
                                 <tbody>
                                     {rules.map(r => (
                                         <tr key={r.id}>
@@ -1186,11 +1210,11 @@ function EscalationSection() {
                                             <td className="td-bold">{r.condition}</td>
                                             <td className="td-mono">{(r.confidence_min * 100).toFixed(0)}–{(r.confidence_max * 100).toFixed(0)}%</td>
                                             <td><span style={{ color: impactColor(r.safety_impact), fontWeight: 600 }}>{r.safety_impact}</span></td>
-                                            <td className="td-bold">{r.escalation_level === 0 ? 'No escalation' : `L${r.escalation_level}`}</td>
+                                            <td className="td-bold">{r.escalation_level === 0 ? t('adminPage.escalation.noEscalation') : `L${r.escalation_level}`}</td>
                                             <td>{r.description}</td>
                                             <td>
-                                                <button className="admin-btn-sm" onClick={() => openEditRule(r)}>Edit</button>
-                                                <button className="admin-btn-sm danger" onClick={() => removeRule(r)}>Delete</button>
+                                                <button className="admin-btn-sm" onClick={() => openEditRule(r)}>{t('common.edit')}</button>
+                                                <button className="admin-btn-sm danger" onClick={() => removeRule(r)}>{t('common.delete')}</button>
                                             </td>
                                         </tr>
                                     ))}
@@ -1207,6 +1231,7 @@ function EscalationSection() {
 // ── Historical Reports ─────────────────────────────────────────────
 
 function ReportsSection() {
+    const { t } = useI18n()
     const [reports, setReports] = useState([])
     const [loading, setLoading] = useState(true)
 
@@ -1216,60 +1241,60 @@ function ReportsSection() {
 
     return (
         <div className="admin-section">
-            <h2 className="admin-title">Historical Incident Reports</h2>
-            {loading ? <div className="admin-loading">Loading...</div> : (
+            <h2 className="admin-title">{t('adminPage.reports.title')}</h2>
+            {loading ? <div className="admin-loading">{t('common.loading')}</div> : (
                 <div className="reports-grid" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px' }}>
                     {reports.map(r => (
                         <div key={r.id} className="report-card" style={{ padding: '20px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface)' }}>
                             <div style={{ fontWeight: '600', fontSize: '1.2em', marginBottom: '15px', color: 'var(--text-bright)' }}>
-                                Incident ID: {r.id || `IR-2024-${r.id}`}
+                                {t('adminPage.reports.labels.incidentId')}: {r.id || `IR-2024-${r.id}`}
                             </div>
 
                             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, auto) 1fr', gap: '8px', marginBottom: '15px' }}>
-                                <div style={{ color: 'var(--text-muted)' }}>Date / Time:</div>
+                                <div style={{ color: 'var(--text-muted)' }}>{t('adminPage.reports.labels.dateTime')}:</div>
                                 <div>{r.created_at ? new Date(r.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(',', ' –') : '—'}</div>
 
-                                <div style={{ color: 'var(--text-muted)' }}>Process Line:</div>
+                                <div style={{ color: 'var(--text-muted)' }}>{t('adminPage.reports.labels.processLine')}:</div>
                                 <div>{r.process_line || '—'}</div>
 
-                                <div style={{ color: 'var(--text-muted)' }}>Machine:</div>
+                                <div style={{ color: 'var(--text-muted)' }}>{t('adminPage.reports.labels.machine')}:</div>
                                 <div>{r.asset_id || '—'}</div>
                             </div>
 
                             <div style={{ marginBottom: '10px' }}>
-                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Symptom:</div>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>{t('adminPage.reports.labels.symptom')}:</div>
                                 <div>{r.symptoms?.join(', ') || r.title || '—'}</div>
                             </div>
 
                             <div style={{ marginBottom: '10px' }}>
-                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Trigger Condition:</div>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>{t('adminPage.reports.labels.triggerCondition')}:</div>
                                 <div>{r.trigger_condition || '—'}</div>
                             </div>
 
                             <div style={{ marginBottom: '10px' }}>
-                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Initial Assumption:</div>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>{t('adminPage.reports.labels.initialAssumption')}:</div>
                                 <div>{r.initial_assumption || '—'}</div>
                             </div>
 
                             <div style={{ marginBottom: '10px' }}>
-                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Root Cause (Confirmed):</div>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>{t('adminPage.reports.labels.rootCause')}:</div>
                                 <div>{r.root_cause || '—'}</div>
                             </div>
 
                             <div style={{ marginBottom: '10px' }}>
-                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Resolution:</div>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>{t('adminPage.reports.labels.resolution')}:</div>
                                 <div>{r.resolution || '—'}</div>
                             </div>
 
                             <div style={{ marginBottom: '10px' }}>
-                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Diagnosis Time:</div>
-                                <div style={{ paddingLeft: '15px' }}>Traditional approach: ~{r.diagnosis_time_traditional || 45} minutes</div>
-                                <div style={{ paddingLeft: '15px' }}>Structured isolation method: ~{r.diagnosis_time_structured || 18} minutes</div>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>{t('adminPage.reports.labels.diagnosisTime')}:</div>
+                                <div style={{ paddingInlineStart: '15px' }}>{t('adminPage.reports.labels.traditional')}: ~{r.diagnosis_time_traditional || 45} {t('adminPage.reports.labels.minutes')}</div>
+                                <div style={{ paddingInlineStart: '15px' }}>{t('adminPage.reports.labels.structured')}: ~{r.diagnosis_time_structured || 18} {t('adminPage.reports.labels.minutes')}</div>
                             </div>
 
                             <div style={{ marginBottom: '0' }}>
-                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Escalation:</div>
-                                <div>{r.escalation_required ? `Escalated to Level ${r.escalation_level}` : 'No escalation required. Resolved at technician level.'}</div>
+                                <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>{t('adminPage.reports.labels.escalation')}:</div>
+                                <div>{r.escalation_required ? t('adminPage.reports.escalatedToLevel', { level: r.escalation_level }) : t('adminPage.reports.noEscalation')}</div>
                             </div>
                         </div>
                     ))}
@@ -1288,6 +1313,7 @@ function getWsBase() {
 }
 
 function LiveEscalationsSection() {
+    const { t } = useI18n()
     const [sessions, setSessions] = useState([])
     const [loading, setLoading] = useState(true)
     const [activeSession, setActiveSession] = useState(null)
@@ -1303,13 +1329,14 @@ function LiveEscalationsSection() {
     useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t) }, [])
 
     const statusColor = (s) => s === 'waiting' ? '#f59e0b' : s === 'active' ? '#10b981' : '#6b7280'
+    const statusLabel = (s) => s === 'waiting' ? t('adminPage.live.status.waiting') : s === 'active' ? t('adminPage.live.status.active') : s
 
     if (activeSession) {
         return (
             <div className="admin-section">
                 <div className="admin-header-row">
-                    <h2 className="admin-title">💬 Escalation Chat</h2>
-                    <button className="admin-btn" onClick={() => setActiveSession(null)}>← Back to list</button>
+                    <h2 className="admin-title">💬 {t('adminPage.live.chatTitle')}</h2>
+                    <button className="admin-btn" onClick={() => setActiveSession(null)}>{t('adminPage.live.backToList')}</button>
                 </div>
                 <div style={{ height: 500, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
                     <EscalationChat
@@ -1330,27 +1357,27 @@ function LiveEscalationsSection() {
     return (
         <div className="admin-section">
             <div className="admin-header-row">
-                <h2 className="admin-title">Live Escalation Chats</h2>
-                <button className="admin-btn" onClick={load}>↻ Refresh</button>
+                <h2 className="admin-title">{t('adminPage.live.title')}</h2>
+                <button className="admin-btn" onClick={load}>↻ {t('common.refresh')}</button>
             </div>
-            {loading ? <div className="admin-loading">Loading...</div> : sessions.length === 0 ? (
+            {loading ? <div className="admin-loading">{t('common.loading')}</div> : sessions.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-dim)' }}>
                     <div style={{ fontSize: 32, marginBottom: 12 }}>💬</div>
-                    <p>No active escalation chats</p>
+                    <p>{t('adminPage.live.empty')}</p>
                 </div>
             ) : (
                 <div className="admin-table-wrap">
                     <table className="admin-table">
-                        <thead><tr><th>Session</th><th>Reporter</th><th>Expert</th><th>Status</th><th>Created</th><th></th></tr></thead>
+                        <thead><tr><th>{t('adminPage.live.table.session')}</th><th>{t('adminPage.live.table.reporter')}</th><th>{t('adminPage.live.table.expert')}</th><th>{t('adminPage.live.table.status')}</th><th>{t('adminPage.live.table.created')}</th><th></th></tr></thead>
                         <tbody>
                             {sessions.map(s => (
                                 <tr key={s.session_id}>
                                     <td className="td-mono">{s.session_id?.slice(0, 12)}...</td>
-                                    <td>{s.user_name || `User #${s.user_id}`}</td>
-                                    <td>{s.expert_name || (s.expert_id ? `Expert #${s.expert_id}` : '—')}</td>
-                                    <td><span style={{ color: statusColor(s.status), fontWeight: 600 }}>{s.status === 'waiting' ? '⏳ Waiting' : '🟢 Active'}</span></td>
+                                    <td>{s.user_name || t('adminPage.live.userWithId', { id: s.user_id })}</td>
+                                    <td>{s.expert_name || (s.expert_id ? t('adminPage.live.expertWithId', { id: s.expert_id }) : '—')}</td>
+                                    <td><span style={{ color: statusColor(s.status), fontWeight: 600 }}>{statusLabel(s.status)}</span></td>
                                     <td>{s.created_at ? new Date(s.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                                    <td><button className="admin-btn-sm outline" onClick={() => setActiveSession(s)}>View Chat</button></td>
+                                    <td><button className="admin-btn-sm outline" onClick={() => setActiveSession(s)}>{t('adminPage.live.viewChat')}</button></td>
                                 </tr>
                             ))}
                         </tbody>

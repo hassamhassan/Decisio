@@ -1,0 +1,542 @@
+{
+  "common": {
+    "language": "Language",
+    "languageCode": "EN",
+    "logout": "Logout",
+    "user": "User",
+    "send": "Send",
+    "you": "You",
+    "notAvailable": "—",
+    "unknownError": "Something went wrong. Please try again or start a new incident.",
+    "cancel": "Cancel",
+    "save": "Save",
+    "create": "Create",
+    "edit": "Edit",
+    "activate": "Activate",
+    "deactivate": "Deactivate",
+    "active": "Active",
+    "inactive": "Inactive",
+    "add": "Add",
+    "delete": "Delete",
+    "close": "Close",
+    "loading": "Loading...",
+    "refresh": "Refresh",
+    "name": "Name",
+    "description": "Description",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "password": "Password",
+    "optional": "Optional"
+  },
+  "userPage": {
+    "newIncident": "+ New Incident",
+    "status": "Status",
+    "risk": "Risk",
+    "confidence": "Confidence",
+    "myIncidents": "My Incidents",
+    "new": "+ New",
+    "noPastIncidents": "No past incidents.",
+    "newIncidentSummary": "New Incident",
+    "riskShort": "Risk",
+    "confShort": "Conf",
+    "welcomeSubtitleLine1": "Operational Decision Support System.",
+    "welcomeSubtitleLine2": "Describe an incident to begin diagnosis.",
+    "decisionMemory": {
+      "title": "Decision Memory"
+    },
+    "loadingAnalyzing": "Analyzing...",
+    "disclaimer": "Decisio can make mistakes. Verify important decisions.",
+    "placeholders": {
+      "processing": "Processing...",
+      "idle": "Describe the incident...",
+      "diagnosing": "Answer the questions...",
+      "outcome": "Describe the outcome...",
+      "default": "Type a message..."
+    },
+    "escalationMessages": {
+      "requiresImmediate": "⏳ This incident requires immediate escalation. Connecting you with a specialist...",
+      "basedOnSeverity": "⏳ Based on incident severity, this requires immediate escalation. Please wait...",
+      "requestSent": "✅ Escalation request sent. An expert will review your incident shortly.",
+      "basedOnDiagnosis": "⏳ Based on the diagnosis, this incident needs to be escalated. Please wait...",
+      "complete": "✅ Escalation complete. An expert has been notified and will assist with this incident.",
+      "issueEscalating": "⏳ Your issue is being escalated to a specialist. Please wait while we connect you with the right team...",
+      "requestSentSuccessfully": "✅ Escalation request sent successfully. An expert has been notified and will review your incident. You will receive further guidance through the escalation channel."
+    },
+    "chatControls": {
+      "liveChatWithExpert": "💬 Live chat with expert",
+      "markResolvedTitle": "Mark as resolved and store the pattern",
+      "successButton": "✅ Success",
+      "endChatButton": "✕ End chat",
+      "hideChatTitle": "Hide chat panel",
+      "successHelp": "Success will save the resolution and write it to Decision Memory."
+    },
+    "incidentCard": {
+      "title": "Incident Card",
+      "asset": "Asset",
+      "severity": "Severity",
+      "safety": "Safety",
+      "risk": "Risk",
+      "scope": "Scope",
+      "symptoms": "Symptoms"
+    },
+    "questions": {
+      "intake": "Intake Question",
+      "diagnostic": "Diagnostic Questions",
+      "stepFormat": "Step {{step}}/10",
+      "categories": {
+        "trigger": "Trigger",
+        "internal_equipment": "Internal Equipment",
+        "upstream": "Upstream",
+        "downstream": "Downstream",
+        "control": "Control System",
+        "instrumentation": "Instrumentation",
+        "utilities": "Utilities",
+        "process_conditions": "Process Conditions",
+        "procedure_human": "Procedure/Human",
+        "verification_closure": "Verification",
+        "clarification": "Clarification"
+      }
+    },
+    "statusBar": {
+      "risk": "Risk",
+      "confidence": "Confidence",
+      "step": "Step",
+      "escalation": "⚠️ Escalation"
+    },
+    "decisionBrief": {
+      "title": "📋 Decision Brief",
+      "confidence": "Confidence",
+      "authority": "Authority",
+      "escalation": "Escalation",
+      "recommended": "Recommended",
+      "safety": "⚠️ Safety",
+      "success": "✅ Success",
+      "failure": "❌ Failure"
+    },
+    "patterns": {
+      "title": "Similar Past Incidents",
+      "mustEscalate": "⚠️ Must Escalate",
+      "priorDecision": "Prior decision"
+    },
+    "escalation": {
+      "pendingTitle": "⏳ Escalation Pending",
+      "pendingHeading": "⚙️ Escalation Matrix Not Configured",
+      "pendingDescriptionDefault": "No escalation levels have been set up for your company.",
+      "pendingHelp": "Your incident has been flagged for escalation but is waiting until an administrator configures the escalation matrix in Admin Portal → Escalation.",
+      "title": "🔴 Escalation",
+      "level": "Level {{level}}",
+      "authority": "Authority",
+      "escalationTarget": "Escalation",
+      "urgency": "Urgency"
+    },
+    "outcome": {
+      "resolved": "✅ Resolved",
+      "failed": "❌ Resolution Failed",
+      "status": "Status",
+      "memoryWritten": "Decision pattern saved to memory",
+      "failedAttempts": "{{count}} failed attempt(s)",
+      "savingSuccess": "Saving success..."
+    },
+    "chat": {
+      "title": "💬 Escalation Chat",
+      "statusConnected": "Connected",
+      "statusConnecting": "Connecting...",
+      "statusDisconnected": "Disconnected",
+      "statusClosed": "Session Ended",
+      "closeSessionTitle": "Close Session",
+      "endButton": "✕ End",
+      "minimizeTitle": "Minimize",
+      "waitingShiftManager": "⏳ Waiting for a shift manager to join…",
+      "waitingShiftManagerHelp": "You can type a message and they will see it when they connect.",
+      "adminViewOnly": "View-only: you can review escalation messages here.",
+      "expertPrompt": "You have joined the escalation. Send a message to start helping the operator.",
+      "expertJoinedSystem": "✅ Shift manager has joined the chat.",
+      "sessionClosedSystem": "Session has been closed by the shift manager.",
+      "roleExpert": "🔧 Expert",
+      "userWithId": "User #{{id}}",
+      "placeholderConnected": "Type a message...",
+      "placeholderWaiting": "Waiting for connection..."
+    }
+  },
+  "expertPage": {
+    "errors": {
+      "loadSessions": "Failed to load sessions"
+    },
+    "toast": {
+      "newEscalation": "🔔 New escalation received!"
+    },
+    "status": {
+      "waiting": "⏳ Waiting",
+      "active": "🟢 Active"
+    },
+    "topBar": {
+      "consoleTitle": "Shift Manager Console",
+      "waiting": "waiting",
+      "admin": "Admin",
+      "chat": "💬 Chat"
+    },
+    "main": {
+      "title": "Escalation Inbox",
+      "subtitleLine1": "When an operator's solution fails, an escalation session is opened here.",
+      "subtitleLine2Prefix": "Click",
+      "joinChat": "Join Chat",
+      "subtitleLine2Suffix": "to connect and help resolve the incident.",
+      "noShiftManagersTitle": "No shift manager accounts found.",
+      "noShiftManagersBody1": "Go to",
+      "adminUsersPath": "Admin -> Users",
+      "noShiftManagersBody2": "and create at least one user with an escalation level role (e.g.",
+      "noShiftManagersBody3": "Without this, escalated incidents will have no one to respond.",
+      "loadingSessions": "Loading sessions...",
+      "emptyState": "No open escalation sessions. All clear.",
+      "waitingSection": "⏳ Waiting — Operator Needs Help",
+      "activeSection": "🟢 Active — In Progress",
+      "autoRefresh": "Auto-refreshes every {{seconds}}s",
+      "refreshNow": "Refresh now",
+      "today": "Today"
+    },
+    "card": {
+      "operator": "Operator",
+      "expert": "Expert",
+      "noExpert": "No expert assigned yet",
+      "open": "💬 Open",
+      "viewTaken": "View (taken)",
+      "claimedBy": "Claimed by"
+    }
+  },
+  "adminPage": {
+    "dashboard": {
+      "title": "Dashboard",
+      "loading": "Loading dashboard...",
+      "failedToLoad": "Failed to load dashboard data",
+      "cards": {
+        "totalIncidents": "Total Incidents",
+        "openIncidents": "Open Incidents",
+        "closed": "Closed",
+        "users": "Users",
+        "equipment": "Equipment",
+        "safetyRules": "Safety Rules",
+        "avgMttd": "Avg MTTD",
+        "reports": "Reports"
+      },
+      "kpi": {
+        "title": "Key Performance Indicators (§27)",
+        "avgMttd": "Avg MTTD",
+        "minMax": "Min {{min}} / Max {{max}}",
+        "escalationRate": "Escalation Rate",
+        "escalatedOfTotal": "{{escalated}} of {{total}} escalated",
+        "processFailureRate": "Process Failure Rate",
+        "ofReports": "{{count}} of {{total}} reports",
+        "resolved": "Resolved"
+      }
+    },
+    "sidebar": {
+      "title": "Admin Portal",
+      "notifications": "Notifications",
+      "markAllRead": "Mark all read",
+      "noNotifications": "No notifications",
+      "unread": "unread",
+      "openMenu": "Open menu",
+      "password": "Password",
+      "sections": {
+        "dashboard": "Dashboard",
+        "users": "Users",
+        "incidents": "Incidents",
+        "equipment": "Equipment",
+        "safety": "Safety Rules",
+        "escalation": "Escalation",
+        "live": "Live Chats",
+        "reports": "Reports"
+      }
+    },
+    "passwordModal": {
+      "title": "Change Password",
+      "current": "Current Password",
+      "next": "New Password",
+      "confirm": "Confirm New Password",
+      "submit": "Change Password",
+      "success": "Password changed successfully!",
+      "errors": {
+        "noMatch": "Passwords do not match",
+        "minLength": "Password must have at least 8 characters"
+      }
+    },
+    "users": {
+      "title": "User Management",
+      "create": "+ Create User",
+      "loading": "Loading users...",
+      "viewer": "Viewer",
+      "modal": {
+        "edit": "Edit User",
+        "create": "Create New User"
+      },
+      "fields": {
+        "username": "Username",
+        "email": "Email",
+        "fullName": "Full Name",
+        "password": "Password",
+        "keepBlank": "leave blank to keep",
+        "userType": "User Type"
+      },
+      "actions": {
+        "activateUser": "Activate User",
+        "deactivateUser": "Deactivate User"
+      },
+      "confirm": "Are you sure you want to {{action}} user {{username}}?",
+      "errors": {
+        "invalidEmail": "Email is not valid",
+        "passwordMin": "Password must have at least 8 characters"
+      },
+      "table": {
+        "username": "Username",
+        "fullName": "Full Name",
+        "email": "Email",
+        "type": "Type",
+        "status": "Status",
+        "created": "Created",
+        "actions": "Actions"
+      }
+    },
+    "incidents": {
+      "title": "Incidents",
+      "escalatedOnly": "Escalated only",
+      "view": "View ->",
+      "table": {
+        "id": "ID",
+        "summary": "Summary",
+        "asset": "Asset",
+        "severity": "Severity",
+        "status": "Status",
+        "confidence": "Confidence",
+        "risk": "Risk"
+      },
+      "empty": {
+        "escalatedOnly": "No escalated incidents",
+        "none": "No incidents yet"
+      },
+      "status": {
+        "closed": "Closed",
+        "escalated": "Escalated",
+        "open": "Open",
+        "diagnosis": "Diagnosis"
+      },
+      "details": {
+        "title": "Incident details",
+        "loading": "Loading incident...",
+        "loadFailed": "Could not load incident.",
+        "failedAttempts": "Failed attempts",
+        "escalationDetail": "Escalation detail",
+        "reasons": "Reasons",
+        "level": "Level",
+        "urgency": "Urgency",
+        "recommendedExpertise": "Recommended expertise",
+        "whatWasTried": "What was tried",
+        "safetyWarnings": "Safety warnings",
+        "escalationChat": "Escalation chat",
+        "sessionId": "Session ID",
+        "supervisorHelp": "Supervisors can join this conversation from the Shift Manager Console (log in as an escalation-level user).",
+        "decisionBrief": "Decision brief",
+        "options": "Options"
+      }
+    },
+    "equipment": {
+      "title": "Equipment Registry",
+      "add": "+ Add Equipment",
+      "addTitle": "Add Equipment",
+      "editTitle": "Edit {{id}}",
+      "confirmDelete": "Delete equipment \"{{id}}\"?",
+      "fields": {
+        "id": "Equipment ID",
+        "name": "Name",
+        "type": "Type",
+        "line": "Process Line",
+        "criticality": "Criticality",
+        "description": "Description",
+        "upstream": "Upstream ID",
+        "downstream": "Downstream ID"
+      },
+      "types": {
+        "rotating": "Rotating",
+        "pressure_vessel": "Pressure Vessel",
+        "heat_exchange": "Heat Exchange",
+        "storage": "Storage",
+        "piping": "Piping",
+        "electrical": "Electrical"
+      },
+      "criticality": {
+        "critical": "Critical",
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low"
+      },
+      "table": {
+        "id": "ID",
+        "name": "Name",
+        "type": "Type",
+        "line": "Line",
+        "criticality": "Criticality",
+        "upstream": "Upstream",
+        "downstream": "Downstream",
+        "actions": "Actions"
+      }
+    },
+    "safety": {
+      "title": "Safety Rules",
+      "addRule": "+ Add Rule",
+      "addRuleTitle": "Add Safety Rule",
+      "editRule": "Edit Rule #{{id}}",
+      "rulePlaceholder": "Rule text",
+      "confirmDelete": "Delete safety rule #{{id}}?",
+      "table": {
+        "type": "Type",
+        "rule": "Rule",
+        "actions": "Actions"
+      }
+    },
+    "escalation": {
+      "title": "Escalation Matrix",
+      "levels": "Levels",
+      "rules": "Rules",
+      "addLevel": "+ Add Level",
+      "addRule": "+ Add Rule",
+      "addLevelTitle": "Add Escalation Level",
+      "addRuleTitle": "Add Escalation Rule",
+      "editLevel": "Edit Level {{level}}",
+      "editRule": "Edit Rule #{{id}}",
+      "emptyLevels": "No escalation levels yet. Click \"+ Add Level\" to create one.",
+      "emptyRules": "No escalation rules yet. Click \"+ Add Rule\" to create one.",
+      "confirmDeleteLevel": "Delete level {{level}}?",
+      "confirmDeleteRule": "Delete rule #{{id}}?",
+      "levelNumber": "Level Number",
+      "levelNamePlaceholder": "e.g. Field Supervisor",
+      "conditionPlaceholder": "e.g. high_risk_low_confidence",
+      "confidenceMin": "Confidence Min",
+      "confidenceMax": "Confidence Max",
+      "noEscalation": "0 - No escalation",
+      "table": {
+        "id": "ID",
+        "condition": "Condition",
+        "confidence": "Confidence",
+        "impact": "Impact",
+        "level": "Level",
+        "description": "Description",
+        "actions": "Actions"
+      }
+    },
+    "reports": {
+      "title": "Historical Incident Reports",
+      "escalatedToLevel": "Escalated to Level {{level}}",
+      "noEscalation": "No escalation required. Resolved at technician level.",
+      "labels": {
+        "incidentId": "Incident ID",
+        "dateTime": "Date / Time",
+        "processLine": "Process Line",
+        "machine": "Machine",
+        "symptom": "Symptom",
+        "triggerCondition": "Trigger Condition",
+        "initialAssumption": "Initial Assumption",
+        "rootCause": "Root Cause (Confirmed)",
+        "resolution": "Resolution",
+        "diagnosisTime": "Diagnosis Time",
+        "traditional": "Traditional approach",
+        "structured": "Structured isolation method",
+        "minutes": "minutes",
+        "escalation": "Escalation"
+      }
+    },
+    "live": {
+      "title": "Live Escalation Chats",
+      "chatTitle": "Escalation Chat",
+      "backToList": "<- Back to list",
+      "empty": "No active escalation chats",
+      "viewChat": "View Chat",
+      "userWithId": "User #{{id}}",
+      "expertWithId": "Expert #{{id}}",
+      "status": {
+        "waiting": "⏳ Waiting",
+        "active": "🟢 Active"
+      },
+      "table": {
+        "session": "Session",
+        "reporter": "Reporter",
+        "expert": "Expert",
+        "status": "Status",
+        "created": "Created"
+      }
+    }
+  },
+  "superAdmin": {
+    "sidebar": {
+      "openMenu": "Open menu",
+      "title": "Super Admin",
+      "companiesAdmins": "Companies & Admins",
+      "role": "super_admin"
+    },
+    "dashboardTitle": "Super Admin Dashboard",
+    "description": "Create companies and assign an admin to each company. Company admins can then manage users, equipment, and settings for their tenant.",
+    "companies": "Companies",
+    "createCompanyAdmin": "Create Company Admin",
+    "createCompanyFirst": "Create a company first, then you can add an admin for it.",
+    "allAdmins": "All Admins",
+    "loadingCompanies": "Loading companies...",
+    "loadingAdmins": "Loading admins...",
+    "emptyCompanies": "No companies yet. Create one to get started.",
+    "emptyAdmins": "No company admins yet. Create one above.",
+    "table": {
+      "id": "ID",
+      "name": "Name",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "adminTable": {
+      "username": "Username",
+      "email": "Email",
+      "fullName": "Full Name",
+      "company": "Company"
+    },
+    "actions": {
+      "createCompany": "+ Create Company",
+      "createAdminForCompany": "+ Create Admin for Company",
+      "createAdmin": "Create Admin",
+      "updateCompany": "Update Company",
+      "updateAdmin": "Update Admin"
+    },
+    "messages": {
+      "selectCompany": "Select a company.",
+      "invalidEmail": "Email is not valid",
+      "passwordMinLength": "Password must have at least 8 characters",
+      "companyCreated": "Company created successfully.",
+      "adminCreated": "Admin created for company.",
+      "adminRemoved": "Admin removed and other company users deactivated.",
+      "companyDeactivated": "Company and all its users deactivated.",
+      "companyActivated": "Company and all its users activated.",
+      "companyUpdated": "Company updated.",
+      "adminUpdated": "Admin updated."
+    },
+    "confirm": {
+      "removeAdmin": "Remove admin \"{{username}}\"? This will DELETE the admin user and deactivate all other users in company \"{{company}}\". Assign a new admin to the company to reactivate users.",
+      "deactivateCompany": "Deactivate company \"{{name}}\" and all its users?",
+      "activateCompany": "Activate company \"{{name}}\" and all its users?"
+    },
+    "modals": {
+      "createCompany": {
+        "title": "Create Company",
+        "companyName": "Company Name"
+      },
+      "createAdmin": {
+        "title": "Create Admin for Company",
+        "companyLabel": "Company (only companies without an admin)",
+        "selectCompany": "Select company...",
+        "allHaveAdmin": "All companies already have an admin. Edit an admin to change organization."
+      },
+      "editCompany": {
+        "title": "Edit Company"
+      },
+      "editAdmin": {
+        "title": "Edit Admin",
+        "organization": "Organization (Company)",
+        "newPassword": "New Password (leave blank to keep current)"
+      }
+    }
+  }
+}

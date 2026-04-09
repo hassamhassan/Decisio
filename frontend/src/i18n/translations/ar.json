@@ -1,0 +1,542 @@
+{
+  "common": {
+    "language": "اللغة",
+    "languageCode": "AR",
+    "logout": "تسجيل الخروج",
+    "user": "المستخدم",
+    "send": "إرسال",
+    "you": "أنت",
+    "notAvailable": "—",
+    "unknownError": "حدث خطأ ما. يرجى المحاولة مرة أخرى أو بدء حادث جديد.",
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "create": "إنشاء",
+    "edit": "تعديل",
+    "activate": "تفعيل",
+    "deactivate": "تعطيل",
+    "active": "نشط",
+    "inactive": "غير نشط",
+    "add": "إضافة",
+    "delete": "حذف",
+    "close": "إغلاق",
+    "loading": "جارٍ التحميل...",
+    "refresh": "تحديث",
+    "name": "الاسم",
+    "description": "الوصف",
+    "low": "منخفض",
+    "medium": "متوسط",
+    "high": "مرتفع",
+    "password": "كلمة المرور",
+    "optional": "اختياري"
+  },
+  "userPage": {
+    "newIncident": "+ حادث جديد",
+    "status": "الحالة",
+    "risk": "المخاطر",
+    "confidence": "الثقة",
+    "myIncidents": "حوادثي",
+    "new": "+ جديد",
+    "noPastIncidents": "لا توجد حوادث سابقة.",
+    "newIncidentSummary": "حادث جديد",
+    "riskShort": "مخاطر",
+    "confShort": "ثقة",
+    "welcomeSubtitleLine1": "نظام دعم القرار التشغيلي.",
+    "welcomeSubtitleLine2": "صف الحادث لبدء التشخيص.",
+    "decisionMemory": {
+      "title": "ذاكرة القرار"
+    },
+    "loadingAnalyzing": "جارٍ التحليل...",
+    "disclaimer": "قد يرتكب Decisio أخطاء. تحقّق من القرارات المهمة.",
+    "placeholders": {
+      "processing": "جارٍ المعالجة...",
+      "idle": "صف الحادث...",
+      "diagnosing": "أجب عن الأسئلة...",
+      "outcome": "صف النتيجة...",
+      "default": "اكتب رسالة..."
+    },
+    "escalationMessages": {
+      "requiresImmediate": "⏳ هذا الحادث يتطلب تصعيدًا فوريًا. جارٍ ربطك بمختص...",
+      "basedOnSeverity": "⏳ بناءً على شدة الحادث، يتطلب الأمر تصعيدًا فوريًا. يرجى الانتظار...",
+      "requestSent": "✅ تم إرسال طلب التصعيد. سيقوم خبير بمراجعة الحادث قريبًا.",
+      "basedOnDiagnosis": "⏳ بناءً على التشخيص، يجب تصعيد هذا الحادث. يرجى الانتظار...",
+      "complete": "✅ اكتمل التصعيد. تم إخطار خبير وسيساعدك في هذا الحادث.",
+      "issueEscalating": "⏳ يتم تصعيد مشكلتك إلى مختص. يرجى الانتظار أثناء ربطك بالفريق المناسب...",
+      "requestSentSuccessfully": "✅ تم إرسال طلب التصعيد بنجاح. تم إخطار خبير وسيقوم بمراجعة الحادث. ستتلقى إرشادات إضافية عبر قناة التصعيد."
+    },
+    "chatControls": {
+      "liveChatWithExpert": "💬 دردشة مباشرة مع خبير",
+      "markResolvedTitle": "تحديد المشكلة كمحلولة وحفظ النمط",
+      "successButton": "✅ نجاح",
+      "endChatButton": "✕ إنهاء الدردشة",
+      "hideChatTitle": "إخفاء لوحة الدردشة",
+      "successHelp": "سيؤدي اختيار نجاح إلى حفظ الحل وكتابته في ذاكرة القرار."
+    },
+    "incidentCard": {
+      "title": "بطاقة الحادث",
+      "asset": "الأصل",
+      "severity": "الشدة",
+      "safety": "السلامة",
+      "risk": "المخاطر",
+      "scope": "النطاق",
+      "symptoms": "الأعراض"
+    },
+    "questions": {
+      "intake": "سؤال الاستلام",
+      "diagnostic": "أسئلة التشخيص",
+      "stepFormat": "الخطوة {{step}}/10",
+      "categories": {
+        "trigger": "المحفز",
+        "internal_equipment": "المعدات الداخلية",
+        "upstream": "المرحلة السابقة",
+        "downstream": "المرحلة اللاحقة",
+        "control": "نظام التحكم",
+        "instrumentation": "الأجهزة",
+        "utilities": "المرافق",
+        "process_conditions": "ظروف العملية",
+        "procedure_human": "الإجراءات/العامل البشري",
+        "verification_closure": "التحقق",
+        "clarification": "توضيح"
+      }
+    },
+    "statusBar": {
+      "risk": "المخاطر",
+      "confidence": "الثقة",
+      "step": "الخطوة",
+      "escalation": "⚠️ تصعيد"
+    },
+    "decisionBrief": {
+      "title": "📋 ملخص القرار",
+      "confidence": "الثقة",
+      "authority": "الصلاحية",
+      "escalation": "التصعيد",
+      "recommended": "موصى به",
+      "safety": "⚠️ السلامة",
+      "success": "✅ نجاح",
+      "failure": "❌ فشل"
+    },
+    "patterns": {
+      "title": "حوادث سابقة مشابهة",
+      "mustEscalate": "⚠️ يجب التصعيد",
+      "priorDecision": "القرار السابق"
+    },
+    "escalation": {
+      "pendingTitle": "⏳ التصعيد قيد الانتظار",
+      "pendingHeading": "⚙️ مصفوفة التصعيد غير مهيأة",
+      "pendingDescriptionDefault": "لم يتم إعداد مستويات التصعيد لشركتك.",
+      "pendingHelp": "تم وضع علامة على الحادث للتصعيد لكنه ينتظر حتى يقوم المسؤول بتهيئة مصفوفة التصعيد في بوابة الإدارة ← التصعيد.",
+      "title": "🔴 تصعيد",
+      "level": "المستوى {{level}}",
+      "authority": "الصلاحية",
+      "escalationTarget": "التصعيد",
+      "urgency": "الاستعجال"
+    },
+    "outcome": {
+      "resolved": "✅ تم الحل",
+      "failed": "❌ فشل الحل",
+      "status": "الحالة",
+      "memoryWritten": "تم حفظ نمط القرار في الذاكرة",
+      "failedAttempts": "{{count}} محاولة فاشلة",
+      "savingSuccess": "جارٍ حفظ النجاح..."
+    },
+    "chat": {
+      "title": "💬 دردشة التصعيد",
+      "statusConnected": "متصل",
+      "statusConnecting": "جارٍ الاتصال...",
+      "statusDisconnected": "غير متصل",
+      "statusClosed": "انتهت الجلسة",
+      "closeSessionTitle": "إغلاق الجلسة",
+      "endButton": "✕ إنهاء",
+      "minimizeTitle": "تصغير",
+      "waitingShiftManager": "⏳ بانتظار انضمام مدير المناوبة…",
+      "waitingShiftManagerHelp": "يمكنك كتابة رسالة وسيشاهدها عند الاتصال.",
+      "adminViewOnly": "للعرض فقط: يمكنك مراجعة رسائل التصعيد هنا.",
+      "expertPrompt": "لقد انضممت إلى التصعيد. أرسل رسالة لبدء مساعدة المشغل.",
+      "expertJoinedSystem": "✅ انضم مدير المناوبة إلى الدردشة.",
+      "sessionClosedSystem": "تم إغلاق الجلسة من قبل مدير المناوبة.",
+      "roleExpert": "🔧 خبير",
+      "userWithId": "المستخدم #{{id}}",
+      "placeholderConnected": "اكتب رسالة...",
+      "placeholderWaiting": "بانتظار الاتصال..."
+    }
+  },
+  "expertPage": {
+    "errors": {
+      "loadSessions": "تعذر تحميل الجلسات"
+    },
+    "toast": {
+      "newEscalation": "🔔 تم استلام تصعيد جديد!"
+    },
+    "status": {
+      "waiting": "⏳ بانتظار",
+      "active": "🟢 نشط"
+    },
+    "topBar": {
+      "consoleTitle": "لوحة مدير المناوبة",
+      "waiting": "بانتظار",
+      "admin": "الإدارة",
+      "chat": "💬 دردشة"
+    },
+    "main": {
+      "title": "صندوق التصعيد",
+      "subtitleLine1": "عند فشل حل المشغّل، يتم فتح جلسة تصعيد هنا.",
+      "subtitleLine2Prefix": "انقر",
+      "joinChat": "الانضمام للدردشة",
+      "subtitleLine2Suffix": "للاتصال والمساعدة في حل الحادث.",
+      "noShiftManagersTitle": "لا توجد حسابات لمدير المناوبة.",
+      "noShiftManagersBody1": "اذهب إلى",
+      "adminUsersPath": "الإدارة -> المستخدمون",
+      "noShiftManagersBody2": "وأنشئ مستخدمًا واحدًا على الأقل بدور مستوى تصعيد (مثل",
+      "noShiftManagersBody3": "بدون ذلك، لن يجد الحادث المصعّد من يستجيب له.",
+      "loadingSessions": "جارٍ تحميل الجلسات...",
+      "emptyState": "لا توجد جلسات تصعيد مفتوحة. كل شيء واضح.",
+      "waitingSection": "⏳ بانتظار — المشغّل يحتاج مساعدة",
+      "activeSection": "🟢 نشط — قيد المعالجة",
+      "autoRefresh": "يتم التحديث التلقائي كل {{seconds}} ثانية",
+      "refreshNow": "تحديث الآن",
+      "today": "اليوم"
+    },
+    "card": {
+      "operator": "المشغّل",
+      "expert": "الخبير",
+      "noExpert": "لم يتم تعيين خبير بعد",
+      "open": "💬 مفتوح",
+      "viewTaken": "عرض (تم الاستلام)",
+      "claimedBy": "تم استلامه بواسطة"
+    }
+  },
+  "adminPage": {
+    "dashboard": {
+      "title": "لوحة المعلومات",
+      "loading": "جارٍ تحميل لوحة المعلومات...",
+      "failedToLoad": "فشل تحميل بيانات لوحة المعلومات",
+      "cards": {
+        "totalIncidents": "إجمالي الحوادث",
+        "openIncidents": "الحوادث المفتوحة",
+        "closed": "المغلقة",
+        "users": "المستخدمون",
+        "equipment": "المعدات",
+        "safetyRules": "قواعد السلامة",
+        "avgMttd": "متوسط وقت الاكتشاف",
+        "reports": "التقارير"
+      },
+      "kpi": {
+        "title": "مؤشرات الأداء الرئيسية (§27)",
+        "avgMttd": "متوسط وقت الاكتشاف",
+        "minMax": "الأدنى {{min}} / الأعلى {{max}}",
+        "escalationRate": "معدل التصعيد",
+        "escalatedOfTotal": "{{escalated}} من {{total}} تم تصعيدها",
+        "processFailureRate": "معدل فشل العملية",
+        "ofReports": "{{count}} من {{total}} تقارير",
+        "resolved": "تم الحل"
+      }
+    },
+    "sidebar": {
+      "title": "بوابة الإدارة",
+      "notifications": "الإشعارات",
+      "markAllRead": "تحديد الكل كمقروء",
+      "noNotifications": "لا توجد إشعارات",
+      "unread": "غير مقروءة",
+      "openMenu": "فتح القائمة",
+      "password": "كلمة المرور",
+      "sections": {
+        "dashboard": "لوحة المعلومات",
+        "users": "المستخدمون",
+        "incidents": "الحوادث",
+        "equipment": "المعدات",
+        "safety": "قواعد السلامة",
+        "escalation": "التصعيد",
+        "live": "الدردشات المباشرة",
+        "reports": "التقارير"
+      }
+    },
+    "passwordModal": {
+      "title": "تغيير كلمة المرور",
+      "current": "كلمة المرور الحالية",
+      "next": "كلمة المرور الجديدة",
+      "confirm": "تأكيد كلمة المرور الجديدة",
+      "submit": "تغيير كلمة المرور",
+      "success": "تم تغيير كلمة المرور بنجاح!",
+      "errors": {
+        "noMatch": "كلمتا المرور غير متطابقتين",
+        "minLength": "يجب أن تتكون كلمة المرور من 8 أحرف على الأقل"
+      }
+    },
+    "users": {
+      "title": "إدارة المستخدمين",
+      "create": "+ إنشاء مستخدم",
+      "loading": "جارٍ تحميل المستخدمين...",
+      "viewer": "مشاهد",
+      "modal": {
+        "edit": "تعديل المستخدم",
+        "create": "إنشاء مستخدم جديد"
+      },
+      "fields": {
+        "username": "اسم المستخدم",
+        "email": "البريد الإلكتروني",
+        "fullName": "الاسم الكامل",
+        "password": "كلمة المرور",
+        "keepBlank": "اتركه فارغًا للإبقاء عليها",
+        "userType": "نوع المستخدم"
+      },
+      "actions": {
+        "activateUser": "تفعيل المستخدم",
+        "deactivateUser": "تعطيل المستخدم"
+      },
+      "confirm": "هل أنت متأكد أنك تريد {{action}} المستخدم {{username}}؟",
+      "errors": {
+        "invalidEmail": "البريد الإلكتروني غير صالح",
+        "passwordMin": "يجب أن تتكون كلمة المرور من 8 أحرف على الأقل"
+      },
+      "table": {
+        "username": "اسم المستخدم",
+        "fullName": "الاسم الكامل",
+        "email": "البريد الإلكتروني",
+        "type": "النوع",
+        "status": "الحالة",
+        "created": "تاريخ الإنشاء",
+        "actions": "الإجراءات"
+      }
+    },
+    "incidents": {
+      "title": "الحوادث",
+      "escalatedOnly": "الحالات المصعّدة فقط",
+      "view": "عرض ->",
+      "table": {
+        "id": "المعرّف",
+        "summary": "الملخص",
+        "asset": "الأصل",
+        "severity": "الشدة",
+        "status": "الحالة",
+        "confidence": "الثقة",
+        "risk": "المخاطر"
+      },
+      "empty": {
+        "escalatedOnly": "لا توجد حوادث مصعّدة",
+        "none": "لا توجد حوادث بعد"
+      },
+      "status": {
+        "closed": "مغلق",
+        "escalated": "مصعّد",
+        "open": "مفتوح",
+        "diagnosis": "قيد التشخيص"
+      },
+      "details": {
+        "title": "تفاصيل الحادث",
+        "loading": "جارٍ تحميل الحادث...",
+        "loadFailed": "تعذر تحميل الحادث.",
+        "failedAttempts": "محاولات فاشلة",
+        "escalationDetail": "تفاصيل التصعيد",
+        "reasons": "الأسباب",
+        "level": "المستوى",
+        "urgency": "الاستعجال",
+        "recommendedExpertise": "الخبرة الموصى بها",
+        "whatWasTried": "ما الذي تم تجربته",
+        "safetyWarnings": "تحذيرات السلامة",
+        "escalationChat": "دردشة التصعيد",
+        "sessionId": "معرّف الجلسة",
+        "supervisorHelp": "يمكن للمشرفين الانضمام لهذه المحادثة من لوحة مدير المناوبة (سجّل الدخول كمستخدم بمستوى تصعيد).",
+        "decisionBrief": "ملخص القرار",
+        "options": "الخيارات"
+      }
+    },
+    "equipment": {
+      "title": "سجل المعدات",
+      "add": "+ إضافة معدة",
+      "addTitle": "إضافة معدة",
+      "editTitle": "تعديل {{id}}",
+      "confirmDelete": "هل تريد حذف المعدة \"{{id}}\"؟",
+      "fields": {
+        "id": "معرّف المعدة",
+        "name": "الاسم",
+        "type": "النوع",
+        "line": "خط العملية",
+        "criticality": "الحرجية",
+        "description": "الوصف",
+        "upstream": "معرّف المنبع",
+        "downstream": "معرّف المصب"
+      },
+      "types": {
+        "rotating": "دوّار",
+        "pressure_vessel": "وعاء ضغط",
+        "heat_exchange": "مبادل حراري",
+        "storage": "تخزين",
+        "piping": "أنابيب",
+        "electrical": "كهربائي"
+      },
+      "criticality": {
+        "critical": "حرج",
+        "high": "عالٍ",
+        "medium": "متوسط",
+        "low": "منخفض"
+      },
+      "table": {
+        "id": "المعرّف",
+        "name": "الاسم",
+        "type": "النوع",
+        "line": "الخط",
+        "criticality": "الحرجية",
+        "upstream": "المنبع",
+        "downstream": "المصب",
+        "actions": "الإجراءات"
+      }
+    },
+    "safety": {
+      "title": "قواعد السلامة",
+      "addRule": "+ إضافة قاعدة",
+      "addRuleTitle": "إضافة قاعدة سلامة",
+      "editRule": "تعديل القاعدة #{{id}}",
+      "rulePlaceholder": "نص القاعدة",
+      "confirmDelete": "هل تريد حذف قاعدة السلامة #{{id}}؟",
+      "table": {
+        "type": "النوع",
+        "rule": "القاعدة",
+        "actions": "الإجراءات"
+      }
+    },
+    "escalation": {
+      "title": "مصفوفة التصعيد",
+      "levels": "المستويات",
+      "rules": "القواعد",
+      "addLevel": "+ إضافة مستوى",
+      "addRule": "+ إضافة قاعدة",
+      "addLevelTitle": "إضافة مستوى تصعيد",
+      "addRuleTitle": "إضافة قاعدة تصعيد",
+      "editLevel": "تعديل المستوى {{level}}",
+      "editRule": "تعديل القاعدة #{{id}}",
+      "emptyLevels": "لا توجد مستويات تصعيد بعد. انقر \"+ إضافة مستوى\" لإنشاء مستوى.",
+      "emptyRules": "لا توجد قواعد تصعيد بعد. انقر \"+ إضافة قاعدة\" لإنشاء قاعدة.",
+      "confirmDeleteLevel": "هل تريد حذف المستوى {{level}}؟",
+      "confirmDeleteRule": "هل تريد حذف القاعدة #{{id}}؟",
+      "levelNumber": "رقم المستوى",
+      "levelNamePlaceholder": "مثال: مشرف ميداني",
+      "conditionPlaceholder": "مثال: high_risk_low_confidence",
+      "confidenceMin": "الحد الأدنى للثقة",
+      "confidenceMax": "الحد الأعلى للثقة",
+      "noEscalation": "0 - بدون تصعيد",
+      "table": {
+        "id": "المعرّف",
+        "condition": "الشرط",
+        "confidence": "الثقة",
+        "impact": "الأثر",
+        "level": "المستوى",
+        "description": "الوصف",
+        "actions": "الإجراءات"
+      }
+    },
+    "reports": {
+      "title": "تقارير الحوادث التاريخية",
+      "escalatedToLevel": "تم التصعيد إلى المستوى {{level}}",
+      "noEscalation": "لا يلزم التصعيد. تم الحل على مستوى الفني.",
+      "labels": {
+        "incidentId": "معرّف الحادث",
+        "dateTime": "التاريخ / الوقت",
+        "processLine": "خط العملية",
+        "machine": "الآلة",
+        "symptom": "العرض",
+        "triggerCondition": "شرط التحفيز",
+        "initialAssumption": "الافتراض الأولي",
+        "rootCause": "السبب الجذري (مؤكد)",
+        "resolution": "الحل",
+        "diagnosisTime": "وقت التشخيص",
+        "traditional": "النهج التقليدي",
+        "structured": "منهج العزل المنظم",
+        "minutes": "دقيقة",
+        "escalation": "التصعيد"
+      }
+    },
+    "live": {
+      "title": "دردشات التصعيد المباشرة",
+      "chatTitle": "دردشة التصعيد",
+      "backToList": "<- العودة للقائمة",
+      "empty": "لا توجد دردشات تصعيد نشطة",
+      "viewChat": "عرض الدردشة",
+      "userWithId": "المستخدم #{{id}}",
+      "expertWithId": "الخبير #{{id}}",
+      "status": {
+        "waiting": "⏳ بانتظار",
+        "active": "🟢 نشط"
+      },
+      "table": {
+        "session": "الجلسة",
+        "reporter": "المبلّغ",
+        "expert": "الخبير",
+        "status": "الحالة",
+        "created": "تاريخ الإنشاء"
+      }
+    }
+  },
+  "superAdmin": {
+    "sidebar": {
+      "openMenu": "فتح القائمة",
+      "title": "المشرف العام",
+      "companiesAdmins": "الشركات والمسؤولون",
+      "role": "مشرف عام"
+    },
+    "dashboardTitle": "لوحة المشرف العام",
+    "description": "أنشئ شركات وعيّن مسؤولًا لكل شركة. بعدها يمكن لمسؤولي الشركات إدارة المستخدمين والمعدات والإعدادات الخاصة بجهتهم.",
+    "companies": "الشركات",
+    "createCompanyAdmin": "إنشاء مسؤول شركة",
+    "createCompanyFirst": "أنشئ شركة أولًا، ثم يمكنك إضافة مسؤول لها.",
+    "allAdmins": "جميع المسؤولين",
+    "loadingCompanies": "جارٍ تحميل الشركات...",
+    "loadingAdmins": "جارٍ تحميل المسؤولين...",
+    "emptyCompanies": "لا توجد شركات بعد. أنشئ شركة للبدء.",
+    "emptyAdmins": "لا يوجد مسؤولو شركات بعد. أنشئ واحدًا أعلاه.",
+    "table": {
+      "id": "المعرّف",
+      "name": "الاسم",
+      "status": "الحالة",
+      "actions": "الإجراءات"
+    },
+    "adminTable": {
+      "username": "اسم المستخدم",
+      "email": "البريد الإلكتروني",
+      "fullName": "الاسم الكامل",
+      "company": "الشركة"
+    },
+    "actions": {
+      "createCompany": "+ إنشاء شركة",
+      "createAdminForCompany": "+ إنشاء مسؤول للشركة",
+      "createAdmin": "إنشاء مسؤول",
+      "updateCompany": "تحديث الشركة",
+      "updateAdmin": "تحديث المسؤول"
+    },
+    "messages": {
+      "selectCompany": "اختر شركة.",
+      "invalidEmail": "البريد الإلكتروني غير صالح",
+      "passwordMinLength": "يجب أن تتكون كلمة المرور من 8 أحرف على الأقل",
+      "companyCreated": "تم إنشاء الشركة بنجاح.",
+      "adminCreated": "تم إنشاء مسؤول للشركة.",
+      "adminRemoved": "تمت إزالة المسؤول وتعطيل بقية مستخدمي الشركة.",
+      "companyDeactivated": "تم تعطيل الشركة وجميع مستخدميها.",
+      "companyActivated": "تم تفعيل الشركة وجميع مستخدميها.",
+      "companyUpdated": "تم تحديث الشركة.",
+      "adminUpdated": "تم تحديث المسؤول."
+    },
+    "confirm": {
+      "removeAdmin": "هل تريد إزالة المسؤول \"{{username}}\"؟ سيؤدي ذلك إلى حذف حساب المسؤول وتعطيل جميع المستخدمين الآخرين في الشركة \"{{company}}\". عيّن مسؤولًا جديدًا لإعادة تفعيل المستخدمين.",
+      "deactivateCompany": "هل تريد تعطيل الشركة \"{{name}}\" وجميع مستخدميها؟",
+      "activateCompany": "هل تريد تفعيل الشركة \"{{name}}\" وجميع مستخدميها؟"
+    },
+    "modals": {
+      "createCompany": {
+        "title": "إنشاء شركة",
+        "companyName": "اسم الشركة"
+      },
+      "createAdmin": {
+        "title": "إنشاء مسؤول للشركة",
+        "companyLabel": "الشركة (الشركات التي لا تملك مسؤولًا فقط)",
+        "selectCompany": "اختر شركة...",
+        "allHaveAdmin": "جميع الشركات لديها مسؤول بالفعل. عدّل مسؤولًا لتغيير الجهة."
+      },
+      "editCompany": {
+        "title": "تعديل الشركة"
+      },
+      "editAdmin": {
+        "title": "تعديل المسؤول",
+        "organization": "الجهة (الشركة)",
+        "newPassword": "كلمة مرور جديدة (اتركه فارغًا للإبقاء على الحالية)"
+      }
+    }
+  }
+}

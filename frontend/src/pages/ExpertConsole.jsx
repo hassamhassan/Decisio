@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getEscalationSessions, checkExpertsAvailable, getStoredUser, getToken, logout } from '../services/api'
 import EscalationChat from '../components/EscalationChat'
+import LanguageToggle from '../components/LanguageToggle'
+import { useI18n } from '../i18n'
 
 // Fallback polling interval in case WS connection drops or misses an event
 const POLL_INTERVAL = 120_0000 // 15 seconds
@@ -33,13 +35,14 @@ function formatDate(ts) {
     }
 }
 
-function statusBadge(status) {
-    if (status === 'waiting') return { label: '⏳ Waiting', color: '#f59e0b' }
-    if (status === 'active') return { label: '🟢 Active', color: '#10b981' }
+function statusBadge(status, t) {
+    if (status === 'waiting') return { label: t('expertPage.status.waiting'), color: '#f59e0b' }
+    if (status === 'active') return { label: t('expertPage.status.active'), color: '#10b981' }
     return { label: status, color: '#6b7280' }
 }
 
 export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin }) {
+    const { lang, dir, t, toggleLang } = useI18n()
     const [sessions, setSessions] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
@@ -70,9 +73,9 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                     setError(null)
                 }
             })
-            .catch(err => {
+            .catch(() => {
                 if (isMounted.current) {
-                    setError(err.message || 'Failed to load sessions')
+                    setError(t('expertPage.errors.loadSessions'))
                 }
             })
             .finally(() => {
@@ -154,7 +157,7 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                             }
                         }
                         loadSessions()
-                        showToast('🔔 New escalation received!')
+                        showToast(t('expertPage.toast.newEscalation'))
                     }
                     if (data.type === 'session_closed') {
                         loadSessions()
@@ -214,18 +217,21 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
     const active = sessions.filter(s => s.status === 'active')
 
     return (
-        <div className="app">
+        <div className="app" dir={dir}>
             {/* Header */}
             <header className="header">
                 <h1>⚙️ <span>Decisio</span></h1>
                 <div className="header-status">
                     <span style={{ color: '#06b6d4', fontWeight: 600 }}>
-                        🔧 {user?.escalation_level_name || 'Shift Manager Console'}
+                        🔧 {user?.escalation_level_name || t('expertPage.topBar.consoleTitle')}
                     </span>
                     {waiting.length > 0 && (
                         <span className="status-chip" style={{ borderColor: '#f59e0b', color: '#f59e0b' }}>
-                            ⏳ {waiting.length} waiting
+                            ⏳ {waiting.length} {t('expertPage.topBar.waiting')}
                         </span>
+                    )}
+                    {isAdmin && (
+                        <button className="btn btn-outline btn-sm" onClick={onAdmin}>{t('expertPage.topBar.admin')}</button>
                     )}
                     <div className="header-user-area">
                         {activeSession?.session_id && chatMinimized && (
@@ -234,14 +240,12 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                                 onClick={() => setChatMinimized(false)}
                                 style={{ borderColor: '#06b6d4', color: '#06b6d4' }}
                             >
-                                💬 Chat
+                                {t('expertPage.topBar.chat')}
                             </button>
                         )}
+                        <LanguageToggle lang={lang} onToggle={toggleLang} t={t} />
                         <span className="header-username">{user?.full_name || user?.username}</span>
-                        {isAdmin && (
-                            <button className="btn btn-outline btn-sm" onClick={onAdmin}>Admin</button>
-                        )}
-                        <button className="btn btn-outline btn-sm btn-danger-outline" onClick={onLogout}>Logout</button>
+                        <button className="btn btn-outline btn-sm btn-danger-outline" onClick={onLogout}>{t('common.logout')}</button>
                     </div>
                 </div>
             </header>
@@ -249,7 +253,7 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
             {/* Toast notification */}
             {toast && (
                 <div key={toast.key} style={{
-                    position: 'fixed', top: 16, right: 16, zIndex: 1000,
+                    position: 'fixed', top: 16, right: dir === 'rtl' ? 'auto' : 16, left: dir === 'rtl' ? 16 : 'auto', zIndex: 1000,
                     background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
                     color: '#fff', padding: '12px 20px', borderRadius: 10,
                     fontSize: 14, fontWeight: 600, boxShadow: '0 4px 20px rgba(245,158,11,0.4)',
@@ -265,11 +269,12 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                 <div style={{ maxWidth: 720, margin: '0 auto' }}>
                     <div style={{ marginBottom: 24 }}>
                         <h2 style={{ color: 'var(--text-bright)', fontSize: 20, fontWeight: 700, marginBottom: 6 }}>
-                            Escalation Inbox
+                            {t('expertPage.main.title')}
                         </h2>
                         <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>
-                            When an operator's solution fails, an escalation session is opened here.
-                            Click <strong>Join Chat</strong> to connect and help resolve the incident.
+                            {t('expertPage.main.subtitleLine1')}
+                            {' '}
+                            {t('expertPage.main.subtitleLine2Prefix')} <strong>{t('expertPage.main.joinChat')}</strong> {t('expertPage.main.subtitleLine2Suffix')}
                         </p>
                     </div>
 
@@ -280,17 +285,17 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                             borderRadius: 8, padding: '12px 16px', marginBottom: 16,
                             fontSize: 13, color: '#ef4444',
                         }}>
-                            ⚠️ <strong>No shift manager accounts found.</strong>{' '}
-                            Go to <strong>Admin → Users</strong> and create at least one user with an
-                            {' '}escalation level role (e.g. <code>L1</code>, <code>L2</code>).
-                            Without this, escalated incidents will have no one to respond.
+                            ⚠️ <strong>{t('expertPage.main.noShiftManagersTitle')}</strong>{' '}
+                            {t('expertPage.main.noShiftManagersBody1')} <strong>{t('expertPage.main.adminUsersPath')}</strong> {t('expertPage.main.noShiftManagersBody2')} <code>L1</code>, <code>L2</code>.
+                            {' '}
+                            {t('expertPage.main.noShiftManagersBody3')}
                         </div>
                     )}
 
                     {loading && (
                         <div className="loading" style={{ marginTop: 32 }}>
                             <div className="loading-dots"><span></span><span></span><span></span></div>
-                            Loading sessions...
+                            {t('expertPage.main.loadingSessions')}
                         </div>
                     )}
 
@@ -307,7 +312,7 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                             color: 'var(--text-dim)', fontSize: 14,
                         }}>
                             <div style={{ fontSize: 32, marginBottom: 12 }}>✅</div>
-                            No open escalation sessions. All clear.
+                            {t('expertPage.main.emptyState')}
                         </div>
                     )}
 
@@ -315,7 +320,7 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                     {waiting.length > 0 && (
                         <section style={{ marginBottom: 28 }}>
                             <h3 style={{ color: '#f59e0b', fontSize: 13, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 10 }}>
-                                ⏳ Waiting — Operator Needs Help
+                                {t('expertPage.main.waitingSection')}
                             </h3>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                                 {waiting.map(s => (
@@ -325,6 +330,8 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                                         isActive={activeSession?.session_id === s.session_id}
                                         onJoin={() => joinSession(s)}
                                         currentUserId={storedUser?.id}
+                                        t={t}
+                                        dir={dir}
                                     />
                                 ))}
                             </div>
@@ -335,7 +342,7 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                     {active.length > 0 && (
                         <section>
                             <h3 style={{ color: '#10b981', fontSize: 13, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 10 }}>
-                                🟢 Active — In Progress
+                                {t('expertPage.main.activeSection')}
                             </h3>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                                 {active.map(s => (
@@ -345,20 +352,22 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                                         isActive={activeSession?.session_id === s.session_id}
                                         onJoin={() => joinSession(s)}
                                         currentUserId={storedUser?.id}
+                                        t={t}
+                                        dir={dir}
                                     />
                                 ))}
                             </div>
                         </section>
                     )}
 
-                    <div style={{ marginTop: 20, color: 'var(--text-dim)', fontSize: 12, textAlign: 'right' }}>
-                        Auto-refreshes every {POLL_INTERVAL / 1000}s
+                    <div style={{ marginTop: 20, color: 'var(--text-dim)', fontSize: 12, textAlign: dir === 'rtl' ? 'left' : 'right' }}>
+                        {t('expertPage.main.autoRefresh', { seconds: POLL_INTERVAL / 1000 })}
                         {' · '}
                         <button
                             onClick={loadSessions}
                             style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, padding: 0 }}
                         >
-                            Refresh now
+                            {t('expertPage.main.refreshNow')}
                         </button>
                     </div>
                 </div>
@@ -372,6 +381,29 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
                     userId={storedUser?.id}
                     userRole={user?.user_type}
                     minimized={chatMinimized}
+                    dir={dir}
+                    labels={{
+                        title: t('userPage.chat.title'),
+                        statusConnected: t('userPage.chat.statusConnected'),
+                        statusConnecting: t('userPage.chat.statusConnecting'),
+                        statusDisconnected: t('userPage.chat.statusDisconnected'),
+                        statusClosed: t('userPage.chat.statusClosed'),
+                        closeSessionTitle: t('userPage.chat.closeSessionTitle'),
+                        endButton: t('userPage.chat.endButton'),
+                        minimizeTitle: t('userPage.chat.minimizeTitle'),
+                        waitingShiftManager: t('userPage.chat.waitingShiftManager'),
+                        waitingShiftManagerHelp: t('userPage.chat.waitingShiftManagerHelp'),
+                        adminViewOnly: t('userPage.chat.adminViewOnly'),
+                        expertPrompt: t('userPage.chat.expertPrompt'),
+                        expertJoinedSystem: t('userPage.chat.expertJoinedSystem'),
+                        sessionClosedSystem: t('userPage.chat.sessionClosedSystem'),
+                        roleExpert: t('userPage.chat.roleExpert'),
+                        userWithId: (id) => t('userPage.chat.userWithId', { id }),
+                        placeholderConnected: t('userPage.chat.placeholderConnected'),
+                        placeholderWaiting: t('userPage.chat.placeholderWaiting'),
+                        send: t('common.send'),
+                        you: t('common.you'),
+                    }}
                     onMinimize={() => setChatMinimized(prev => !prev)}
                 />
             )}
@@ -380,8 +412,8 @@ export default function ExpertConsole({ user, onLogout, onAdmin, onSuperAdmin })
 }
 
 
-function SessionCard({ session, isActive, onJoin, currentUserId }) {
-    const badge = statusBadge(session.status)
+function SessionCard({ session, isActive, onJoin, currentUserId, t, dir }) {
+    const badge = statusBadge(session.status, t)
     const isMe = session.expert_id === currentUserId
     // Another expert has already claimed this session
     const isTakenByOther = session.expert_id !== null && session.expert_id !== undefined && !isMe
@@ -401,17 +433,17 @@ function SessionCard({ session, isActive, onJoin, currentUserId }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                     <span style={{ color: badge.color, fontSize: 12, fontWeight: 700 }}>{badge.label}</span>
                     <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>·</span>
-                    <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>{formatDate(session.created_at)}</span>
+                    <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>{formatDate(session.created_at).replace('Today ', `${t('expertPage.main.today')} `)}</span>
                 </div>
                 <div style={{ color: 'var(--text-bright)', fontSize: 13, fontWeight: 600, marginBottom: 3 }}>
-                    Operator: {session.user_name}
+                    {t('expertPage.card.operator')}: {session.user_name}
                 </div>
                 {session.expert_id ? (
                     <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-                        Expert: {isMe ? `You (${session.expert_name || 'you'})` : session.expert_name || `#${session.expert_id}`}
+                        {t('expertPage.card.expert')}: {isMe ? `${t('common.you')} (${session.expert_name || t('common.you').toLowerCase()})` : session.expert_name || `#${session.expert_id}`}
                     </div>
                 ) : (
-                    <div style={{ color: '#f59e0b', fontSize: 12 }}>No expert assigned yet</div>
+                    <div style={{ color: '#f59e0b', fontSize: 12 }}>{t('expertPage.card.noExpert')}</div>
                 )}
                 <div style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 4, fontFamily: 'monospace' }}>
                     {session.session_id.slice(0, 8)}…
@@ -419,10 +451,10 @@ function SessionCard({ session, isActive, onJoin, currentUserId }) {
             </div>
 
             {/* Right: action */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: dir === 'rtl' ? 'flex-start' : 'flex-end', gap: 4 }}>
                 {isActive ? (
                     <span style={{ color: 'var(--accent)', fontSize: 12, fontWeight: 600 }}>
-                        💬 Open
+                        {t('expertPage.card.open')}
                     </span>
                 ) : (
                     <button
@@ -431,12 +463,12 @@ function SessionCard({ session, isActive, onJoin, currentUserId }) {
                         style={{ fontSize: 13, padding: '7px 16px', whiteSpace: 'nowrap' }}
                         disabled={isTakenByOther}
                     >
-                        {isTakenByOther ? 'View (taken)' : 'Join Chat'}
+                        {isTakenByOther ? t('expertPage.card.viewTaken') : t('expertPage.main.joinChat')}
                     </button>
                 )}
                 {isTakenByOther && (
-                    <span style={{ fontSize: 11, color: 'var(--text-dim)', textAlign: 'right' }}>
-                        Claimed by {session.expert_name || `#${session.expert_id}`}
+                    <span style={{ fontSize: 11, color: 'var(--text-dim)', textAlign: dir === 'rtl' ? 'left' : 'right' }}>
+                        {t('expertPage.card.claimedBy')} {session.expert_name || `#${session.expert_id}`}
                     </span>
                 )}
             </div>
