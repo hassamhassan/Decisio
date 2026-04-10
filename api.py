@@ -97,7 +97,7 @@ app.add_middleware(
 )
 
 # WebSocket escalation chat (ensure ws:// or wss:// for client connections)
-_ws_base = (os.getenv("WS_BASE_URL") or "http://localhost:8000").rstrip("/")
+_ws_base = (os.getenv("WS_BASE_URL") or "http://localhost:8020").rstrip("/")
 if _ws_base.startswith("https://"):
     WS_BASE_URL = "wss://" + _ws_base[8:]
 elif _ws_base.startswith("http://"):
@@ -2459,4 +2459,4 @@ if os.path.exists(frontend_dist):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app,host="0.0.0.0",port=8000)
+    uvicorn.run(app,host="0.0.0.0",port=8020)

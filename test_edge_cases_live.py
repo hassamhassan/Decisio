@@ -4,8 +4,8 @@ import websockets
 import json
 import uuid
 
-BASE_URL = "http://localhost:8000"
-WS_URL = "ws://localhost:8000"
+BASE_URL = "http://localhost:8020"
+WS_URL = "ws://localhost:8020"
 
 # Generate a unique company suffix to avoid collisions
 run_id = str(uuid.uuid4())[:8]

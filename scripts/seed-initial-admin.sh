@@ -4,7 +4,7 @@
 # Default: admin / admin (change in production)
 
 set -e
-API_URL="${API_URL:-http://localhost:8000}"
+API_URL="${API_URL:-http://localhost:8020}"
 USERNAME="${1:-admin}"
 PASSWORD="${2:-admin}"
 

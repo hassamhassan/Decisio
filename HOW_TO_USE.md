@@ -24,8 +24,8 @@ Decisio is entirely containerized. It uses PostgreSQL (relational data), Redis (
    docker-compose up -d --build
    ```
 3. Access the application:
-   - **Frontend App:** `http://localhost:8000`
-   - **API Documentation (Swagger):** `http://localhost:8000/docs`
+   - **Frontend App:** `http://localhost:8020`
+   - **API Documentation (Swagger):** `http://localhost:8020/docs`
 
 *(Note: The database schemas are automatically managed by Alembic upon startup).*
 
