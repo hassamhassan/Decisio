@@ -3,6 +3,7 @@ import { createIncident, submitAnswer, submitOutcome, generateBrief, logout, get
 import EscalationChat from '../components/EscalationChat'
 import LanguageToggle from '../components/LanguageToggle'
 import { useI18n } from '../i18n'
+import { resolveTextDirection } from '../utils/textDirection'
 
 export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin }) {
     const { lang, dir, t, toggleLang } = useI18n()
@@ -446,7 +447,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                 }}
                             >
                                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-bright)', marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    {inc.summary || t('userPage.newIncidentSummary')}
+                                    <span dir={resolveTextDirection(inc.summary || t('userPage.newIncidentSummary'), dir)} className="bidi-text">{inc.summary || t('userPage.newIncidentSummary')}</span>
                                 </div>
                                 <div style={{ fontSize: '12px', color: 'var(--text-dim)', display: 'flex', justifyContent: 'space-between' }}>
                                     <span>{inc.status}</span>
@@ -478,11 +479,15 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                         )}
 
                         {messages.map(msg => (
-                            <div key={msg.id} className={`message ${msg.type === 'user' ? 'message-user' : 'message-system'}`}>
+                            <div
+                                key={msg.id}
+                                className={`message ${msg.type === 'user' ? 'message-user' : 'message-system'} message-dir-${resolveTextDirection(msg.content, dir)}`}
+                                dir={resolveTextDirection(msg.content, dir)}
+                            >
                                 {msg.type === 'user' && (
                                     <>
                                         <div className="message-label">{t('common.you')}</div>
-                                        <div>{msg.content}</div>
+                                        <div dir={resolveTextDirection(msg.content, dir)} className="bidi-text">{msg.content}</div>
                                     </>
                                 )}
 
@@ -635,7 +640,8 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
 function renderSystemMessage(content, onOutcome, phase, t) {
     if (typeof content === 'string') {
-        return <div>{content}</div>
+        const contentDir = resolveTextDirection(content, 'ltr')
+        return <div dir={contentDir} className="bidi-text">{content}</div>
     }
 
     switch (content.type) {
@@ -747,7 +753,7 @@ function Questions({ data, step, t }) {
                             {t(`userPage.questions.categories.${q.category}`) !== `userPage.questions.categories.${q.category}` ? t(`userPage.questions.categories.${q.category}`) : q.category}
                             {q.blocking_safety_flag && ' ⚠️'}
                         </div>
-                        {q.question}
+                        <span dir={resolveTextDirection(q.question, 'ltr')} className="bidi-text">{q.question}</span>
                     </div>
                 ))}
             </div>

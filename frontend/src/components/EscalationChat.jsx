@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { getToken, getEscalationMessages, getWsBaseUrl } from '../services/api'
+import { resolveTextDirection } from '../utils/textDirection'
 
 /**
  * EscalationChat — Real-time WebSocket chat panel for escalation sessions.
@@ -289,17 +290,20 @@ export default function EscalationChat({
                 {messages.map(msg => {
                     const isMe = msg.senderId === userId
                     const isSystem = msg.senderRole === 'system'
+                    const msgDir = resolveTextDirection(msg.message, dir)
 
                     if (isSystem) {
                         return (
-                            <div key={msg.id} className="chat-msg chat-msg-system">
-                                <div className="chat-msg-bubble system">{msg.message}</div>
+                            <div key={msg.id} className={`chat-msg chat-msg-system chat-msg-dir-${msgDir}`} dir={msgDir}>
+                                <div className="chat-msg-bubble system">
+                                    <span dir={msgDir} className="bidi-text">{msg.message}</span>
+                                </div>
                             </div>
                         )
                     }
 
                     return (
-                        <div key={msg.id} className={`chat-msg ${isMe ? 'chat-msg-me' : 'chat-msg-other'}`}>
+                        <div key={msg.id} className={`chat-msg ${isMe ? 'chat-msg-me' : 'chat-msg-other'} chat-msg-dir-${msgDir}`} dir={msgDir}>
                             <div className="chat-msg-meta">
                                 <span className="chat-msg-role">
                                     {isMe ? (labels.you || 'You') : msg.senderRole === 'expert' ? (labels.roleExpert || '🔧 Expert') : (labels.userWithId ? labels.userWithId(msg.senderId) : `User #${msg.senderId}`)}
@@ -307,7 +311,7 @@ export default function EscalationChat({
                                 <span className="chat-msg-time">{formatTime(msg.timestamp)}</span>
                             </div>
                             <div className={`chat-msg-bubble ${isMe ? 'me' : 'other'}`}>
-                                {msg.message}
+                                <span dir={msgDir} className="bidi-text">{msg.message}</span>
                             </div>
                         </div>
                     )

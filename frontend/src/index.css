@@ -813,11 +813,27 @@ body {
   border-right: 3px solid var(--accent);
 }
 
-[dir='rtl'] .message-system,
-[dir='rtl'] .message-user,
 [dir='rtl'] .welcome,
 [dir='rtl'] .gpt-input-field {
   text-align: right;
+}
+
+.message-dir-ltr,
+.chat-msg-dir-ltr {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: plaintext;
+}
+
+.message-dir-rtl,
+.chat-msg-dir-rtl {
+  direction: rtl;
+  text-align: right;
+  unicode-bidi: plaintext;
+}
+
+.bidi-text {
+  unicode-bidi: isolate;
 }
 
 /* ══════════════════════════════════════════════════════
