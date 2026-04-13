@@ -73,10 +73,10 @@ Your only task is to identify the affected machine from the latest user message.
 {machine_list}
 
 Return ONLY this JSON:
-{
+{{
   "machine_name": "exact machine ID/name from the message",
   "next_message": "empty if clear, otherwise ask the operator to choose from the list"
-}
+}}
 
 Do not ask about symptoms again.
 Focus only on machine identification.
