@@ -14,6 +14,7 @@ import uuid
 import logging
 import traceback
 import re
+import math
 from datetime import datetime,timezone
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -59,6 +60,129 @@ _db_available = True  # Mutable container to avoid `global` in async
 
 def use_db() -> bool:
     return _db_available
+
+
+def _build_incident_report_id(incident_id: str) -> str:
+    """Create a deterministic report id from incident id."""
+    compact = re.sub(r"[^A-Za-z0-9]", "", incident_id or "").upper()
+    if not compact:
+        compact = uuid.uuid4().hex[:20].upper()
+    return f"IR-{compact[:20]}"
+
+
+def _extract_fact_value(facts: list[dict], key: str) -> str:
+    for item in reversed(facts or []):
+        if item.get("key") == key:
+            return str(item.get("value") or "").strip()
+    return ""
+
+
+async def _upsert_incident_report(
+    session,
+    *,
+    incident_id: str,
+    company_id: int,
+    state: dict,
+    outcome_notes: str = "",
+) -> None:
+    """Create/update historical incident report row for admin portal."""
+    report_id = _build_incident_report_id(incident_id)
+    incident_card = state.get("incident_card") or {}
+    facts = state.get("facts") or []
+    hypotheses = state.get("hypotheses") or []
+    chosen = state.get("chosen_decision_option") or {}
+    escalation = state.get("escalation") or {}
+
+    asset_id = (incident_card.get("asset_id") or "").strip() or None
+    process_line = ""
+    if asset_id:
+        eq_res = await session.execute(
+            sa_select(Equipment).where(
+                Equipment.company_id == company_id,
+                Equipment.id == asset_id,
+            )
+        )
+        eq = eq_res.scalar_one_or_none()
+        process_line = (eq.process_line or "") if eq else ""
+
+    normalized_summary = (incident_card.get("normalized_summary") or "").strip()
+    title = normalized_summary or (state.get("report") or "Incident Report").strip()[:256]
+    symptoms = incident_card.get("symptoms") or []
+    if not symptoms:
+        reported_symptoms = (state.get("reported_symptoms") or "").strip()
+        symptoms = [reported_symptoms] if reported_symptoms else []
+
+    top_h = hypotheses[0] if hypotheses else {}
+    initial_assumption = (top_h.get("description") or "").strip()
+    root_cause = _extract_fact_value(facts, "root_cause_confirmed")
+    turning_point = _extract_fact_value(facts, "turning_point_signal")
+    resolution = (state.get("resolution_summary") or "").strip() or outcome_notes.strip()
+
+    chosen_title = (chosen.get("title") or "").strip()
+    chosen_desc = (chosen.get("description") or "").strip()
+    if chosen_title and chosen_desc:
+        decision_taken = f"{chosen_title}: {chosen_desc}"
+    else:
+        decision_taken = chosen_title or chosen_desc or resolution
+
+    signals = []
+    for fact in facts[:20]:
+        k = str(fact.get("key") or "").strip()
+        v = str(fact.get("value") or "").strip()
+        if k and v:
+            signals.append(f"{k}: {v}")
+
+    lessons = []
+    outcome = (state.get("outcome") or "").strip()
+    if outcome:
+        lessons.append(f"Outcome: {outcome}")
+    if outcome_notes:
+        lessons.append(outcome_notes.strip())
+    for reason in (state.get("escalation_reasons") or [])[:5]:
+        if reason:
+            lessons.append(str(reason).strip())
+
+    structured_minutes = None
+    if state.get("mttd_seconds") is not None:
+        structured_minutes = max(1, int(math.ceil(float(state["mttd_seconds"]) / 60.0)))
+    diagnosis_time_traditional = state.get("diagnosis_time_traditional") or (structured_minutes * 2 if structured_minutes else 45)
+    diagnosis_time_structured = state.get("diagnosis_time_structured") or (structured_minutes or 18)
+
+    escalation_required = bool(state.get("escalation_triggered") or outcome == "failure")
+    escalation_level = int(escalation.get("escalation_level") or 0)
+    escalation_reason = "; ".join((state.get("escalation_reasons") or [])[:3])
+
+    existing = await session.execute(
+        sa_select(IncidentReport).where(
+            IncidentReport.company_id == company_id,
+            IncidentReport.id == report_id,
+        )
+    )
+    rec = existing.scalar_one_or_none()
+    if rec is None:
+        rec = IncidentReport(id=report_id, company_id=company_id, title=title[:256])
+        session.add(rec)
+
+    rec.title = title[:256]
+    rec.asset_id = asset_id
+    rec.process_line = process_line
+    rec.symptoms = symptoms[:25]
+    rec.trigger_condition = (state.get("reported_symptoms") or normalized_summary or "")[:2000]
+    rec.initial_assumption = initial_assumption[:2000]
+    rec.root_cause = root_cause[:2000]
+    rec.root_cause_category = (incident_card.get("root_cause_category") or "unknown")[:32]
+    rec.resolution = resolution[:5000]
+    rec.turning_point_signal = turning_point[:2000]
+    rec.decision_taken = decision_taken[:5000]
+    rec.signals = signals
+    rec.lessons = lessons
+    rec.escalation_required = escalation_required
+    rec.escalation_level = escalation_level
+    rec.escalation_reason = escalation_reason[:2000]
+    rec.severity = (incident_card.get("severity") or "medium")[:16]
+    rec.safety_level = (incident_card.get("safety_level") or "unknown")[:16]
+    rec.diagnosis_time_traditional = int(diagnosis_time_traditional)
+    rec.diagnosis_time_structured = int(diagnosis_time_structured)
 
 
 # ── App lifecycle ───────────────────────────────────────────────────
@@ -818,6 +942,20 @@ async def submit_outcome(incident_id: str,req: OutcomeRequest,user: TokenData = 
     if state.get("escalation_triggered"):
         await _ensure_escalation_session(state,user)
 
+    # Persist a historical incident report for both success and failure outcomes.
+    if use_db() and user.company_id is not None and outcome in ("success", "failure", "partial"):
+        try:
+            async with get_session() as session:
+                await _upsert_incident_report(
+                    session,
+                    incident_id=incident_id,
+                    company_id=user.company_id,
+                    state=state,
+                    outcome_notes=outcome_notes,
+                )
+        except Exception as e:
+            logger.error("Failed to upsert incident report: %s", e, exc_info=True)
+
     await _save_state(incident_id,state)
     return _state_to_response(state)
 
@@ -872,6 +1010,21 @@ async def verify_resolution(incident_id: str,req: VerificationRequest,user: Toke
 
     if state.get("escalation_triggered"):
         await _ensure_escalation_session(state,user)
+
+    # Verification-complete incidents should also appear in historical reports.
+    if use_db() and user.company_id is not None and state.get("status") in ("SUCCESS", "ESCALATED", "RETRY_DIAGNOSIS"):
+        try:
+            async with get_session() as session:
+                await _upsert_incident_report(
+                    session,
+                    incident_id=incident_id,
+                    company_id=user.company_id,
+                    state=state,
+                    outcome_notes=(state.get("outcome_notes") or state.get("verification_notes") or ""),
+                )
+        except Exception as e:
+            logger.error("Failed to upsert incident report during verification: %s", e, exc_info=True)
+
     await _save_state(incident_id,state)
     return _state_to_response(state)
 
@@ -1275,7 +1428,7 @@ async def list_incident_reports(user: TokenData = Depends(require_auth)):
         result = await session.execute(
             sa_select(IncidentReport)
             .where(IncidentReport.company_id == user.company_id)
-            .order_by(IncidentReport.id)
+            .order_by(IncidentReport.created_at.desc(), IncidentReport.id.desc())
         )
         rows = result.scalars().all()
         return {
@@ -1909,6 +2062,11 @@ def _safe_round(val,ndigits=1):
         return None
 
 
+# Incident terminal states used by admin metrics.
+# SUCCESS is the normal user-resolved path in current outcome flow.
+_RESOLVED_STATUSES = ("SUCCESS","CLOSED","CLOSED_NO_MEMORY")
+
+
 @app.get("/api/admin/dashboard")
 async def admin_dashboard(admin: TokenData = Depends(require_company_admin)):
     """Dashboard stats for admin portal (scoped to company). Returns zeros if DB empty or schema missing."""
@@ -1931,7 +2089,7 @@ async def admin_dashboard(admin: TokenData = Depends(require_company_admin)):
 
             open_incidents = await session.scalar(
                 sa_select(func.count()).select_from(Incident).where(
-                    Incident.company_id == cid,Incident.status != "CLOSED"
+                    Incident.company_id == cid,Incident.status.notin_(_RESOLVED_STATUSES)
                 )
             ) or 0
 
@@ -2030,14 +2188,14 @@ async def get_kpi_stats(admin: TokenData = Depends(require_company_admin)):
 
             closed = await session.scalar(
                 sa_select(func.count()).select_from(Incident).where(
-                    Incident.company_id == admin.company_id,Incident.status == "CLOSED"
+                    Incident.company_id == admin.company_id,Incident.status.in_(_RESOLVED_STATUSES)
                 )
             ) or 0
 
             process_failures = await session.scalar(
                 sa_select(func.count()).select_from(IncidentReport).where(
                     IncidentReport.company_id == admin.company_id,
-                    IncidentReport.root_cause_category == "process",
+                    IncidentReport.escalation_required.is_(True),
                 )
             ) or 0
 
