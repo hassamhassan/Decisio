@@ -217,28 +217,29 @@ export async function deleteEscalationRule(ruleId) {
 
 // ── Incident API ───────────────────────────────────────────────────
 
-export async function createIncident(report) {
+export async function createIncident(report, language = 'en') {
     return apiFetch(`${API_BASE}/incidents`, {
         method: 'POST',
-        body: JSON.stringify({ report }),
+        body: JSON.stringify({ report, language }),
     });
 }
 
-export async function submitAnswer(incidentId, answer) {
+export async function submitAnswer(incidentId, answer, language = 'en') {
     return apiFetch(`${API_BASE}/incidents/${incidentId}/answer`, {
         method: 'POST',
-        body: JSON.stringify({ answer }),
+        body: JSON.stringify({ answer, language }),
     });
 }
 
-export async function generateBrief(incidentId) {
+export async function generateBrief(incidentId, language = 'en') {
     return apiFetch(`${API_BASE}/incidents/${incidentId}/brief`, {
         method: 'POST',
+        body: JSON.stringify({ language }),
     });
 }
 
-export async function submitOutcome(incidentId, outcome, selectedOptionId = null) {
-    const body = { outcome };
+export async function submitOutcome(incidentId, outcome, selectedOptionId = null, language = 'en') {
+    const body = { outcome, language };
     if (selectedOptionId != null) body.selected_option_id = selectedOptionId;
     return apiFetch(`${API_BASE}/incidents/${incidentId}/outcome`, {
         method: 'POST',

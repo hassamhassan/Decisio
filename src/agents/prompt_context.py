@@ -8,6 +8,27 @@ linearly. We keep the full structures in graph state — only prompts are capped
 
 from __future__ import annotations
 
+
+def get_language_instruction(language: str | None) -> str:
+    """Return an LLM prompt suffix that forces the response language.
+
+    When the user has selected Arabic in the UI, every user-facing text field
+    produced by the LLM (questions, summaries, options, guidance, etc.) must
+    be in Arabic.  Internal-only fields (rationale, category keys) stay in
+    English so downstream code can parse them reliably.
+    """
+    if language and language.lower().startswith("ar"):
+        return (
+            "\n\nIMPORTANT — LANGUAGE: The user's interface is set to Arabic. "
+            "You MUST write ALL user-facing text (questions, descriptions, "
+            "summaries, titles, guidance, next_message, risk descriptions, etc.) "
+            "in Arabic (العربية). Keep JSON keys, category identifiers, and "
+            "internal-only fields (like 'rationale') in English."
+        )
+    return ""
+
+
+
 def format_qa_history_for_llm(
     qa_history: list[dict],
     *,

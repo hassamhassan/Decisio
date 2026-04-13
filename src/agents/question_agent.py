@@ -39,7 +39,7 @@ from src.state.state import (
     DecisioState,
     Question,
 )
-from src.agents.prompt_context import format_qa_history_for_llm
+from src.agents.prompt_context import format_qa_history_for_llm, get_language_instruction
 
 # Recent Q&A only in prompts; full qa_history stays in state for DB / dedup.
 QUESTION_AGENT_QA_PROMPT_WINDOW = 8
@@ -381,8 +381,9 @@ def question_agent(state: DecisioState) -> DecisioState:
         f"- NOT repeat or closely paraphrase any earlier question in the Q&A history"
     )
 
+    lang_instruction = get_language_instruction(state.get("language"))
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=SYSTEM_PROMPT + lang_instruction),
         HumanMessage(content=context + "\n\n" + step_instruction),
     ]
 

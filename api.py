@@ -112,10 +112,12 @@ app.include_router(ws_router,tags=["websocket"])
 class CreateIncidentRequest(BaseModel):
     report: str = Field(...,min_length=1,max_length=10_000)
     reported_by: str = Field(default="",max_length=200)
+    language: str = Field(default="en",max_length=5,description="UI language code (en or ar)")
 
 
 class AnswerRequest(BaseModel):
     answer: str = Field(...,min_length=1,max_length=5_000)
+    language: str = Field(default="en",max_length=5,description="UI language code (en or ar)")
 
 
 class OutcomeRequest(BaseModel):
@@ -124,6 +126,11 @@ class OutcomeRequest(BaseModel):
         default=None,
         description="decision_brief.options[].option_id the operator ran before Success.",
     )
+    language: str = Field(default="en",max_length=5,description="UI language code (en or ar)")
+
+
+class BriefRequest(BaseModel):
+    language: str = Field(default="en",max_length=5,description="UI language code (en or ar)")
 
 
 class VerificationRequest(BaseModel):
@@ -493,9 +500,11 @@ async def create_incident(req: CreateIncidentRequest,user: TokenData = Depends(r
 
     try:
         sanitized_report = sanitize_user_input(req.report,max_length=10_000)
+        ui_lang = req.language if req.language in ("en","ar") else "en"
         state = intake_graph.invoke({
             "report": sanitized_report,
             "company_id": user.company_id,
+            "language": ui_lang,
             "current_diagnostic_step": 1,
             "questions_asked_count": 0,
             "qa_history": [],
@@ -522,6 +531,7 @@ async def create_incident(req: CreateIncidentRequest,user: TokenData = Depends(r
 
     # Ensure company_id is propagated
     state["company_id"] = user.company_id
+    state["language"] = ui_lang
 
     state["_session_id"] = session_id
     incident_id = session_id
@@ -562,6 +572,8 @@ async def submit_answer(incident_id: str,req: AnswerRequest,user: TokenData = De
     answer = sanitize_user_input(req.answer.strip(),max_length=5000)
     if not answer:
         answer = "I don't know / skipped"
+    ui_lang = req.language if req.language in ("en","ar") else "en"
+    state["language"] = ui_lang
 
     try:
         if not state.get("screening_complete") or not state.get("incident_card"):
@@ -640,12 +652,15 @@ async def submit_answer(incident_id: str,req: AnswerRequest,user: TokenData = De
 
 
 @app.post("/api/incidents/{incident_id}/brief",response_model=IncidentResponse)
-async def generate_brief(incident_id: str,user: TokenData = Depends(require_auth)):
+async def generate_brief(incident_id: str,req: BriefRequest = None,user: TokenData = Depends(require_auth)):
     """Force generate a Decision Brief with current information."""
     _ensure_chat_access(user)
     state = await _load_state(incident_id,company_id=user.company_id if user.company_id is not None else None)
     if not state:
         raise HTTPException(404,"Incident not found")
+    if req:
+        ui_lang = req.language if req.language in ("en","ar") else "en"
+        state["language"] = ui_lang
 
     try:
         mem_update = retrieval_agent(state)
@@ -680,6 +695,8 @@ async def submit_outcome(incident_id: str,req: OutcomeRequest,user: TokenData = 
 
     state["outcome_notes"] = outcome_notes
     state["status"] = "EXECUTING"
+    ui_lang = req.language if req.language in ("en","ar") else "en"
+    state["language"] = ui_lang
 
     # Operator-selected brief option (stored to Decision Memory on success)
     brief = state.get("decision_brief") or {}

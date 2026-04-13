@@ -19,7 +19,7 @@ from src.llm import get_llm_for_brief
 from src.state.state import DecisionBrief, DecisionOption, DecisioState
 from src.sanitization import sanitize_decision_brief
 from src.data.escalation_matrix import get_escalation_levels
-from src.agents.prompt_context import format_retrieved_patterns_for_llm
+from src.agents.prompt_context import format_retrieved_patterns_for_llm, get_language_instruction
 
 DECISION_BRIEF_PATTERN_PROMPT_CAP = 4
 
@@ -183,9 +183,10 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
 
     context = "\n".join(context_parts)
 
+    lang_instruction = get_language_instruction(state.get("language"))
     llm = get_llm_for_brief(model="gpt-4", temperature=0.2)
     response = llm.invoke([
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=SYSTEM_PROMPT + lang_instruction),
         HumanMessage(content=context),
     ])
 

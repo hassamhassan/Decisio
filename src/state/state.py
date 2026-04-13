@@ -272,6 +272,7 @@ class DecisioState(TypedDict, total=False):
 
     # ── Tenant ──────────────────────────────────────────────────────
     company_id: int  # Company / tenant ID for multi-tenant isolation
+    language: str  # UI language code ("en" or "ar") — agents respond in this language
 
     # ── Raw input ────────────────────────────────────────────────────
     report: str  # Free-text incident report from the user

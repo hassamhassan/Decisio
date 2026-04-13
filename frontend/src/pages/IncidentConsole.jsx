@@ -156,7 +156,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
             setLoading(true)
 
             try {
-                const data = await createIncident(text)
+                const data = await createIncident(text, lang)
                 setIncident(data)
                 loadHistory()
 
@@ -180,7 +180,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                     if (data.escalation_triggered) {
                         // Generate brief if escalation triggered early in intake
                         addMessage('system', { type: 'escalation_notice', message: t('userPage.escalationMessages.basedOnSeverity') })
-                        const briefData = await generateBrief(data.incident_id)
+                        const briefData = await generateBrief(data.incident_id, lang)
                         setIncident(briefData)
                         if (briefData.escalation) {
                             addMessage('system', { type: 'escalation', data: briefData.escalation })
@@ -213,7 +213,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
             setLoading(true)
 
             try {
-                const data = await submitAnswer(incident.incident_id, text)
+                const data = await submitAnswer(incident.incident_id, text, lang)
                 const prevMemoryGuidance = incident?.memory_guidance || ''
                 // If card was just generated, show it
                 if (!incident.incident_card && data.incident_card) {
@@ -251,7 +251,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                     } else if (data.escalation_triggered) {
                         // Generate brief if escalation triggered
                         addMessage('system', { type: 'escalation_notice', message: t('userPage.escalationMessages.basedOnDiagnosis') })
-                        const briefData = await generateBrief(data.incident_id)
+                        const briefData = await generateBrief(data.incident_id, lang)
                         setIncident(briefData)
                         if (briefData.escalation) {
                             addMessage('system', { type: 'escalation', data: briefData.escalation })
@@ -271,7 +271,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                         addMessage('system', { type: 'questions', data: data.questions, step: data.current_diagnostic_step })
                     } else {
                         // No more questions, generate brief
-                        const briefData = await generateBrief(data.incident_id)
+                        const briefData = await generateBrief(data.incident_id, lang)
                         setIncident(briefData)
                         addMessage('system', { type: 'brief', data: briefData.decision_brief })
                         setPhase('outcome')
@@ -291,7 +291,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
             try {
                 const selectedOpt = outcomeSelectedOptionIdRef.current
                 outcomeSelectedOptionIdRef.current = null
-                const data = await submitOutcome(incident.incident_id, text, selectedOpt)
+                const data = await submitOutcome(incident.incident_id, text, selectedOpt, lang)
                 setIncident(data)
 
                 addMessage('system', { type: 'outcome_result', data })
@@ -332,7 +332,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
         try {
             addMessage('system', { type: 'status', data: { status: t('userPage.outcome.savingSuccess') } })
             const selectedOpt = outcomeSelectedOptionIdRef.current
-            const data = await submitOutcome(incident.incident_id, 'success', selectedOpt)
+            const data = await submitOutcome(incident.incident_id, 'success', selectedOpt, lang)
             setIncident(data)
             loadHistory()
             addMessage('system', {
@@ -495,7 +495,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                             </div>
                         ))}
 
-                                {loading && (
+                        {loading && (
                             <div className="message message-system">
                                 <div className="loading">
                                     <div className="loading-dots">

@@ -39,6 +39,7 @@ from src.llm import get_llm
 from src.state.state import DecisioState
 from src.data.assets import get_asset
 from src.db.sync_queries import fetch_all_equipment
+from src.agents.prompt_context import get_language_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -154,13 +155,14 @@ def _parse_json(raw: str) -> dict:
 
 # ── Phase-specific LLM calls ──────────────────────────────────────────
 
-def _run_symptoms_phase(original_report: str, qa_history: list[dict], llm) -> dict:
+def _run_symptoms_phase(original_report: str, qa_history: list[dict], llm, language: str = "en") -> dict:
     """
     Ask the LLM: do we have symptoms yet? If yes, summarise them.
     Only passes turns that happened BEFORE a machine was first mentioned
     to avoid the LLM confusing machine names with symptom context.
     """
-    messages: list = [SystemMessage(content=_SYMPTOMS_SYSTEM)]
+    prompt = _SYMPTOMS_SYSTEM + get_language_instruction(language)
+    messages: list = [SystemMessage(content=prompt)]
     if original_report:
         messages.append(HumanMessage(content=original_report))
     # Only add clarification turns — this is already filtered to category="clarification"
@@ -173,13 +175,13 @@ def _run_symptoms_phase(original_report: str, qa_history: list[dict], llm) -> di
         return {"has_symptoms": False, "symptoms_summary": "", "next_message": ""}
 
 
-def _run_machine_phase(latest_answer: str, symptoms: str, machine_list: str, llm) -> dict:
+def _run_machine_phase(latest_answer: str, symptoms: str, machine_list: str, llm, language: str = "en") -> dict:
     """
     Ask the LLM: what machine did the operator just name?
     Only passes the LATEST single answer — not the full history — so
     earlier symptom turns cannot confuse the extraction.
     """
-    prompt = _MACHINE_SYSTEM.format(symptoms=symptoms, machine_list=machine_list)
+    prompt = _MACHINE_SYSTEM.format(symptoms=symptoms, machine_list=machine_list) + get_language_instruction(language)
     messages: list = [
         SystemMessage(content=prompt),
         HumanMessage(content=latest_answer or "(no answer provided yet)"),
@@ -221,6 +223,7 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
 
     llm = get_llm(model="gpt-4o",temperature=0.4)
     company_id = state.get("company_id")
+    ui_lang = state.get("language") or "en"
 
     try:
         from src.db.sync_queries import fetch_all_equipment
@@ -280,7 +283,7 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
     # SYMPTOMS PHASE
     # ══════════════════════════════════════════════════════════════════
     if not in_machine_phase:
-        result = _run_symptoms_phase(original, qa_history, llm)
+        result = _run_symptoms_phase(original, qa_history, llm, language=ui_lang)
         has_symptoms: bool = bool(result.get("has_symptoms"))
         symptoms_summary: str = (result.get("symptoms_summary") or "").strip()
         next_msg: str = (result.get("next_message") or "").strip()
@@ -300,7 +303,7 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
         # Symptoms confirmed — save them and ask about the machine.
         # (We do NOT try to extract the machine in the same LLM call;
         #  we let the next explicit turn handle that cleanly.)
-        result_m = _run_machine_phase(original, symptoms_summary, machine_list, llm)
+        result_m = _run_machine_phase(original, symptoms_summary, machine_list, llm, language=ui_lang)
         machine_name: str = (result_m.get("machine_name") or "").strip()
         machine_msg: str = (result_m.get("next_message") or "").strip()
 
@@ -339,7 +342,7 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
     # interfere with machine name extraction.
     latest = _latest_user_answer(qa_history)
 
-    result = _run_machine_phase(latest, symptoms_to_use, machine_list, llm)
+    result = _run_machine_phase(latest, symptoms_to_use, machine_list, llm, language=ui_lang)
     machine_name = (result.get("machine_name") or "").strip()
     next_msg = (result.get("next_message") or "").strip()
 
