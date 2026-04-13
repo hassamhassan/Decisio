@@ -32,25 +32,21 @@ def pre_intake_router(state: DecisioState) -> str:
     """
     Route after problem_intake.
 
-    Contract with the API:
-    - If `clarification_question` is present in state, we END the graph run.
-      The FastAPI layer detects this field in the response and sends the
-      clarification question to the user. When the user replies, their
-      answer is appended to `state['report']` and the intake_graph is
-      invoked again (see `/api/incidents/{id}/answer` in `api.py`).
-    - If no clarification is needed, proceed to `incident_intake`.
+    Only proceed to incident_intake when intake_phase is "complete"
+    (both issue AND machine confirmed). Otherwise END and let the
+    API layer send the clarification question back to the user.
     """
     if state is None:
         state = {}
-    if state.get("clarification_question"):
-        # We need clarification (problem or machine name is missing).
-        # Returning the special key "end" routes this node to END; the
-        # outer API loop will handle asking the question and re-running
-        # intake_graph after the user answers.
-        return "end"
-    
-    # Otherwise, it's clear enough to build an incident card
-    return "incident_intake"
+
+    # Only proceed when problem_intake has confirmed both issue + machine.
+    if state.get("intake_phase") == "complete":
+        return "incident_intake"
+
+    # Everything else (symptoms phase, machine phase, clarification needed)
+    # ends the graph run. The API layer detects clarification_question or
+    # the incomplete intake_phase and re-runs intake after the user replies.
+    return "end"
 
 
 def post_screening_router(state: DecisioState) -> str:

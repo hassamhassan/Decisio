@@ -36,12 +36,19 @@ def fetch_equipment(asset_id: str, company_id: int | None = None) -> Optional[di
         from src.db.models import Equipment
         with _get_session() as session:
             from sqlalchemy import select as sa_select
-            stmt = sa_select(Equipment).where(Equipment.id == asset_id.upper().strip())
+            asset_clean = asset_id.upper().strip()
+            stmt = sa_select(Equipment).where(Equipment.id == asset_clean)
             if company_id is not None:
                 stmt = stmt.where(Equipment.company_id == company_id)
             eq = session.execute(stmt).scalar_one_or_none()
             if not eq:
-                return None
+                # Fallback: case-insensitive prefix match (e.g. "CMP-01" matches "CMP-01 (Air Compressor)")
+                stmt_like = sa_select(Equipment).where(Equipment.id.ilike(f"{asset_clean}%"))
+                if company_id is not None:
+                    stmt_like = stmt_like.where(Equipment.company_id == company_id)
+                eq = session.execute(stmt_like).scalars().first()
+                if not eq:
+                    return None
             return {
                 "id": eq.id,
                 "name": eq.name,

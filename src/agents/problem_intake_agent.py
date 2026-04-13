@@ -45,44 +45,42 @@ logger = logging.getLogger(__name__)
 
 # ── Prompts ───────────────────────────────────────────────────────────
 
-_SYMPTOMS_SYSTEM = """\
+_SYMPTOMS_SYSTEM = f"""\
 You are the intake assistant for Decisio, an operational decision-support system.
 
-Your ONLY task right now: determine whether the operator has described any symptoms
-or operational problems.
+Your only task is to decide whether the operator has described any operational issue.
 
-A symptom is ANY of: equipment stops, alarms, unusual noises, vibration, smoke,
-smell, temperature change, pressure change, visible damage, unexpected behaviour.
-A greeting ("hello", "hi") with NO issue description is NOT a symptom.
+Greeting-only messages (e.g. "hi", "hello") are NOT issues.
 
-Analyse the conversation so far and return ONLY this JSON:
+Return ONLY this JSON:
 {{
-  "has_symptoms": true or false,
-  "symptoms_summary": "1-2 sentence plain-language summary of symptoms, or empty string",
+  "has_issue": true or false,
+  "issue_summary": "short plain-language summary or empty string",
   "next_message": "Your reply to the operator. If no symptoms yet, ask them to describe what they observe. If symptoms are clear, leave empty."
 }}
 
-IMPORTANT: Do NOT ask about machines. Do NOT advance to any other topic.
-Return ONLY the JSON, no markdown."""
-
+Do not ask about machines or move to another topic.
+Return JSON only.
+"""
 _MACHINE_SYSTEM = """\
-You are the intake assistant for Decisio, an operational decision-support system.
+You are the intake assistant for Decisio.
 
-The operator's symptoms have already been recorded: {symptoms}
+The operator’s issue has already been captured:
+{symptoms}
 
-Your ONLY task: identify which machine or piece of equipment is affected based on
-the operator's latest message shown below.
+Your only task is to identify the affected machine from the latest user message.
 
 {machine_list}
 
-Return ONLY this JSON — no markdown:
-{{
-  "machine_name": "the exact machine ID or name the operator mentioned, or empty string if unclear",
-  "next_message": "Your reply. If the machine is clear, leave empty. If unclear, ask the operator to pick from the list above."
-}}
+Return ONLY this JSON:
+{
+  "machine_name": "exact machine ID/name from the message",
+  "next_message": "empty if clear, otherwise ask the operator to choose from the list"
+}
 
-IMPORTANT: Do NOT ask about symptoms again. Focus only on the machine."""
-
+Do not ask about symptoms again.
+Focus only on machine identification.
+"""
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -170,7 +168,14 @@ def _run_symptoms_phase(original_report: str, qa_history: list[dict], llm) -> di
         return _parse_json(resp.content or "")
     except Exception as e:
         logger.warning(f"Symptoms LLM call failed: {e}")
-        return {"has_symptoms": False, "symptoms_summary": "", "next_message": ""}
+        # Backwards compatibility for older schema keys.
+        return {
+            "has_issue": False,
+            "issue_summary": "",
+            "next_message": "",
+            "has_symptoms": False,
+            "symptoms_summary": "",
+        }
 
 
 def _run_machine_phase(latest_answer: str, symptoms: str, machine_list: str, llm) -> dict:
@@ -219,7 +224,7 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
     if state.get("intake_phase") == "complete":
         return {"intake_phase": "complete", "current_node": "problem_intake"}
 
-    llm = get_llm(model="gpt-4o",temperature=0.4)
+    llm = get_llm(model="gpt-4o",temperature=0.3)
     company_id = state.get("company_id")
 
     try:
@@ -281,11 +286,12 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
     # ══════════════════════════════════════════════════════════════════
     if not in_machine_phase:
         result = _run_symptoms_phase(original, qa_history, llm)
-        has_symptoms: bool = bool(result.get("has_symptoms"))
-        symptoms_summary: str = (result.get("symptoms_summary") or "").strip()
+        # New schema: has_issue/issue_summary. Keep backwards compatibility.
+        has_issue: bool = bool(result.get("has_issue", result.get("has_symptoms")))
+        issue_summary: str = (result.get("issue_summary") or result.get("symptoms_summary") or "").strip()
         next_msg: str = (result.get("next_message") or "").strip()
 
-        if not has_symptoms or not symptoms_summary:
+        if not has_issue or not issue_summary:
             # Still waiting for symptoms
             return {
                 "intake_phase": "symptoms",
@@ -300,7 +306,7 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
         # Symptoms confirmed — save them and ask about the machine.
         # (We do NOT try to extract the machine in the same LLM call;
         #  we let the next explicit turn handle that cleanly.)
-        result_m = _run_machine_phase(original, symptoms_summary, machine_list, llm)
+        result_m = _run_machine_phase(original, issue_summary, machine_list, llm)
         machine_name: str = (result_m.get("machine_name") or "").strip()
         machine_msg: str = (result_m.get("next_message") or "").strip()
 
@@ -310,8 +316,8 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
             if asset_info:
                 return {
                     "intake_phase": "complete",
-                    "problem_description": symptoms_summary,
-                    "reported_symptoms": symptoms_summary,
+                    "problem_description": issue_summary,
+                    "reported_symptoms": issue_summary,
                     "machine_name": machine_name,
                     "clarification_question": None,
                     "status": "OPEN",
@@ -320,8 +326,8 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
 
         return {
             "intake_phase": "machine",
-            "problem_description": symptoms_summary,
-            "reported_symptoms": symptoms_summary,    # ← locked; never re-asked
+            "problem_description": issue_summary,
+            "reported_symptoms": issue_summary,    # ← locked; never re-asked
             "machine_name": "",
             "clarification_question": machine_msg,
             "status": "CLARIFICATION_NEEDED",

@@ -26,35 +26,25 @@ from src.state.state import DecisioState
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-You are the Expert Knowledge Capture Agent for Decisio.
+Expert Knowledge Capture Agent for Decisio. Extract structured decision knowledge — NOT repair steps.
 
-An expert has resolved an incident and provided their input. Your job is to extract
-structured decision knowledge — NOT repair steps.
-
-From the expert's input, extract a JSON object:
-
+Return ONLY JSON:
 {{
-  "confirmed_root_cause": "The actual root cause confirmed by the expert",
-  "root_cause_category": "technical | process | external",
-  "turning_point_signal": "The key signal/observation that confirmed the root cause — the 'aha moment'",
-  "why_symptoms_misleading": "Why initial symptoms pointed in wrong direction, if applicable",
-  "why_first_line_failed": "Why the first-line technician couldn't resolve it",
-  "escalation_rule": "When should similar cases be escalated in the future (specific conditions)",
-  "delay_risk": "What would have happened if the decision was delayed further",
-  "confidence_boundary": "At what level/role should this type of incident be handled",
-  "pattern_signals": ["list of signals that should trigger early recognition of this pattern"],
+  "confirmed_root_cause": "actual root cause confirmed by expert",
+  "root_cause_category": "technical|process|external",
+  "turning_point_signal": "key signal that confirmed root cause — the 'aha moment'",
+  "why_symptoms_misleading": "why initial symptoms pointed wrong direction, if applicable",
+  "why_first_line_failed": "why first-line couldn't resolve it",
+  "escalation_rule": "when should similar cases escalate (specific conditions)",
+  "delay_risk": "what would happen if decision was delayed further",
+  "confidence_boundary": "at what role level should this type be handled",
+  "pattern_signals": ["signals for early recognition of this pattern"],
   "must_escalate_in_future": true/false
 }}
 
-CRITICAL BOUNDARIES — do NOT extract:
-- How the fix was performed (repair steps)
-- Disassembly or installation instructions
-- Operating procedures or setpoints
-- Any direct execution guidance
-
-You capture WHY the decision succeeded, not HOW the fix was done.
-
-Return ONLY the JSON object, no markdown fences, no extra text.
+Do NOT extract: repair steps, disassembly instructions, operating procedures, setpoints, execution guidance.
+Capture WHY the decision succeeded, not HOW the fix was done.
+Return ONLY JSON, no markdown fences.
 """
 
 
