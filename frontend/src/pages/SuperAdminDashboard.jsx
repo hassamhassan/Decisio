@@ -54,6 +54,7 @@ export default function SuperAdminDashboard() {
     // Edit admin modal
     const [showEditAdmin, setShowEditAdmin] = useState(false)
     const [editAdminForm, setEditAdminForm] = useState({ id: null, company_id: '', email: '', full_name: '', password: '' })
+    const [confirmAction, setConfirmAction] = useState(null) // { action: 'delete_admin'|'deactivate_company'|'activate_company', payload: any }
 
     const loadCompanies = () => {
         setLoading(true)
@@ -133,48 +134,45 @@ export default function SuperAdminDashboard() {
         }
     }
 
-    const handleDeleteAdmin = async (admin) => {
-        if (!confirm(t('superAdmin.confirm.removeAdmin', { username: admin.username, company: admin.company_name }))) return
+    const handleDeleteAdmin = (admin) => {
         setError('')
         setSuccess('')
-        try {
-            await superAdminDeactivateAdmin(admin.id)
-            setSuccess(t('superAdmin.messages.adminRemoved'))
-            loadAdmins()
-            loadCompanies()
-            setTimeout(() => setSuccess(''), 3000)
-        } catch (err) {
-            setError(err.message)
-        }
+        setConfirmAction({ action: 'delete_admin', payload: admin })
     }
 
-    const handleDeactivateCompany = async (company) => {
-        if (!confirm(t('superAdmin.confirm.deactivateCompany', { name: company.name }))) return
+    const handleDeactivateCompany = (company) => {
         setError('')
         setSuccess('')
-        try {
-            await superAdminDeactivateCompany(company.id)
-            setSuccess(t('superAdmin.messages.companyDeactivated'))
-            loadCompanies()
-            loadAdmins()
-            setTimeout(() => setSuccess(''), 3000)
-        } catch (err) {
-            setError(err.message)
-        }
+        setConfirmAction({ action: 'deactivate_company', payload: company })
     }
 
-    const handleActivateCompany = async (company) => {
-        if (!confirm(t('superAdmin.confirm.activateCompany', { name: company.name }))) return
+    const handleActivateCompany = (company) => {
+        setError('')
+        setSuccess('')
+        setConfirmAction({ action: 'activate_company', payload: company })
+    }
+
+    const confirmExecute = async () => {
+        if (!confirmAction) return
         setError('')
         setSuccess('')
         try {
-            await superAdminActivateCompany(company.id)
-            setSuccess(t('superAdmin.messages.companyActivated'))
-            loadCompanies()
+            if (confirmAction.action === 'delete_admin') {
+                await superAdminDeactivateAdmin(confirmAction.payload.id)
+                setSuccess(t('superAdmin.messages.adminRemoved') || 'Admin removed and other company users deactivated.')
+            } else if (confirmAction.action === 'deactivate_company') {
+                await superAdminDeactivateCompany(confirmAction.payload.id)
+                setSuccess(t('superAdmin.messages.companyDeactivated') || 'Company and all its users deactivated.')
+            } else if (confirmAction.action === 'activate_company') {
+                await superAdminActivateCompany(confirmAction.payload.id)
+                setSuccess(t('superAdmin.messages.companyActivated') || 'Company and all its users activated.')
+            }
+            setConfirmAction(null)
             loadAdmins()
+            loadCompanies()
             setTimeout(() => setSuccess(''), 3000)
         } catch (err) {
-            setError(err.message)
+            setError(err?.message || 'Failed')
         }
     }
 
@@ -282,6 +280,45 @@ export default function SuperAdminDashboard() {
                     <p className="admin-description">
                         {t('superAdmin.description')}
                     </p>
+
+                    {confirmAction && (
+                        <Modal
+                            title={t('common.confirm')}
+                            onClose={() => setConfirmAction(null)}
+                        >
+                            <div style={{ padding: '0 10px 10px 10px' }}>
+                                {confirmAction.action === 'delete_admin' && (
+                                    <p style={{ margin: '0 0 20px 0', fontSize: '15px' }}>
+                                        {t('superAdmin.confirm.removeAdmin', { username: confirmAction.payload.username, company: confirmAction.payload.company_name })}
+                                    </p>
+                                )}
+                                {confirmAction.action === 'deactivate_company' && (
+                                    <p style={{ margin: '0 0 20px 0', fontSize: '15px' }}>
+                                        {t('superAdmin.confirm.deactivateCompany', { name: confirmAction.payload.name })}
+                                    </p>
+                                )}
+                                {confirmAction.action === 'activate_company' && (
+                                    <p style={{ margin: '0 0 20px 0', fontSize: '15px' }}>
+                                        {t('superAdmin.confirm.activateCompany', { name: confirmAction.payload.name })}
+                                    </p>
+                                )}
+                                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                                    <button className="admin-btn" onClick={() => setConfirmAction(null)}>{t('common.cancel')}</button>
+                                    <button
+                                        className={`admin-btn ${confirmAction.action === 'activate_company' ? 'primary' : 'danger'}`}
+                                        onClick={confirmExecute}
+                                        style={confirmAction.action === 'activate_company' ? { background: '#10b981', color: 'white', border: 'none' } : {}}
+                                    >
+                                        {confirmAction.action === 'delete_admin'
+                                            ? t('common.delete')
+                                            : confirmAction.action === 'deactivate_company'
+                                                ? t('common.deactivate')
+                                                : t('common.activate')}
+                                    </button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
 
                     {error && !showCreateCompany && !showCreateAdmin && !showEditCompany && !showEditAdmin && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
                     {success && <div className="form-success" style={{ marginBottom: 12, color: '#10b981', fontWeight: 600 }}>{success}</div>}

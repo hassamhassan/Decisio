@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { createContext, createElement, useCallback, useContext, useMemo, useState } from 'react'
 import en from './translations/en.json'
 import ar from './translations/ar.json'
 
@@ -6,6 +6,8 @@ export const I18N_STORAGE_KEY = 'decisio_lang'
 export const DEFAULT_LANG = 'en'
 
 const RESOURCES = { en, ar }
+
+const I18nContext = createContext(null)
 
 function getNestedValue(obj, path) {
   return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj)
@@ -22,7 +24,7 @@ function getInitialLang() {
   return stored && RESOURCES[stored] ? stored : DEFAULT_LANG
 }
 
-export function useI18n() {
+function useI18nState() {
   const [lang, setLangState] = useState(getInitialLang)
 
   const setLang = useCallback((nextLang) => {
@@ -50,4 +52,16 @@ export function useI18n() {
   const dir = useMemo(() => (lang === 'ar' ? 'rtl' : 'ltr'), [lang])
 
   return { lang, dir, t, setLang, toggleLang }
+}
+
+export function I18nProvider({ children }) {
+  const value = useI18nState()
+  // Note: keep this file JSX-free so Vite can parse it as plain .js in production builds.
+  return createElement(I18nContext.Provider, { value }, children)
+}
+
+export function useI18n() {
+  const ctx = useContext(I18nContext)
+  // Fallback for safety if a component is rendered outside provider (shouldn't happen in app)
+  return ctx || useI18nState()
 }

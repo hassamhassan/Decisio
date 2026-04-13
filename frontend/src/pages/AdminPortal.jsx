@@ -835,6 +835,7 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
     const [editItem, setEditItem] = useState(null)
     const [form, setForm] = useState({ id: '', name: '', equipment_type: 'rotating', process_line: 'Line A', criticality: 'medium', description: '', upstream_id: '', downstream_id: '' })
     const [error, setError] = useState('')
+    const [confirmDelete, setConfirmDelete] = useState(null) // equipment row
 
     const load = () => { setLoading(true); listEquipment().then(d => setEquipment(d.equipment || [])).catch(console.error).finally(() => setLoading(false)) }
     useEffect(() => { load() }, [])
@@ -888,8 +889,7 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
     }
 
     const handleDelete = async (eq) => {
-        if (!confirm(t('adminPage.equipment.confirmDelete', { id: eq.id }))) return
-        try { await deleteEquipment(eq.id); load() } catch (err) { alert(err.message) }
+        setConfirmDelete(eq)
     }
 
     const critColor = (c) => c === 'critical' ? '#ef4444' : c === 'high' ? '#f59e0b' : c === 'medium' ? '#3b82f6' : '#6b7280'
@@ -935,6 +935,32 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
                 </Modal>
             )}
 
+            {confirmDelete && (
+                <Modal title={t('common.confirm')} error={error} onClose={() => { setConfirmDelete(null); setError(''); }}>
+                    <div style={{ marginBottom: 14 }}>
+                        {t('adminPage.equipment.confirmDelete', { id: confirmDelete.id })}
+                    </div>
+                    <div className="form-actions">
+                        <button type="button" className="admin-btn" onClick={() => setConfirmDelete(null)}>{t('common.cancel')}</button>
+                        <button
+                            type="button"
+                            className="admin-btn danger"
+                            onClick={async () => {
+                                try {
+                                    await deleteEquipment(confirmDelete.id)
+                                    setConfirmDelete(null)
+                                    load()
+                                } catch (err) {
+                                    setError(err?.message || t('common.error'))
+                                }
+                            }}
+                        >
+                            {t('common.delete')}
+                        </button>
+                    </div>
+                </Modal>
+            )}
+
             {loading ? <div className="admin-loading">{t('common.loading')}</div> : (
                 <div className="admin-table-wrap">
                     <table className="admin-table">
@@ -973,6 +999,7 @@ function SafetySection() {
     const [editItem, setEditItem] = useState(null)
     const [form, setForm] = useState({ type: '', rule: '' })
     const [error, setError] = useState('')
+    const [confirmDelete, setConfirmDelete] = useState(null) // rule row
 
     const load = () => { setLoading(true); listSafetyRules().then(d => setRules(d.rules || [])).catch(console.error).finally(() => setLoading(false)) }
     useEffect(() => { load() }, [])
@@ -1009,8 +1036,7 @@ function SafetySection() {
     }
 
     const handleDelete = async (r) => {
-        if (!confirm(t('adminPage.safety.confirmDelete', { id: r.id }))) return
-        try { await deleteSafetyRule(r.id); load() } catch (err) { alert(err.message) }
+        setConfirmDelete(r)
     }
 
     return (
@@ -1036,6 +1062,32 @@ function SafetySection() {
                             <button type="submit" className="admin-btn primary">{editItem ? t('common.save') : t('common.add')}</button>
                         </div>
                     </form>
+                </Modal>
+            )}
+
+            {confirmDelete && (
+                <Modal title={t('common.confirm')} error={error} onClose={() => { setConfirmDelete(null); setError(''); }}>
+                    <div style={{ marginBottom: 14 }}>
+                        {t('adminPage.safety.confirmDelete', { id: confirmDelete.id })}
+                    </div>
+                    <div className="form-actions">
+                        <button type="button" className="admin-btn" onClick={() => setConfirmDelete(null)}>{t('common.cancel')}</button>
+                        <button
+                            type="button"
+                            className="admin-btn danger"
+                            onClick={async () => {
+                                try {
+                                    await deleteSafetyRule(confirmDelete.id)
+                                    setConfirmDelete(null)
+                                    load()
+                                } catch (err) {
+                                    setError(err?.message || t('common.error'))
+                                }
+                            }}
+                        >
+                            {t('common.delete')}
+                        </button>
+                    </div>
                 </Modal>
             )}
 
@@ -1075,6 +1127,7 @@ function EscalationSection() {
     const [editRule, setEditRule] = useState(null)
     const [ruleForm, setRuleForm] = useState({ condition: '', confidence_min: 0, confidence_max: 1, safety_impact: 'low', escalation_level: 1, description: '', sort_order: 100 })
     const [error, setError] = useState('')
+    const [confirmDelete, setConfirmDelete] = useState(null) // { kind: 'level'|'rule', item }
 
     const load = () => { setLoading(true); getEscalationMatrix().then(setData).catch(console.error).finally(() => setLoading(false)) }
     useEffect(() => { load() }, [])
@@ -1091,8 +1144,7 @@ function EscalationSection() {
         } catch (err) { setError(err.message) }
     }
     const removeLevel = async (l) => {
-        if (!confirm(t('adminPage.escalation.confirmDeleteLevel', { level: l.level }))) return
-        try { await deleteEscalationLevel(l.level); load() } catch (err) { alert(err.message) }
+        setConfirmDelete({ kind: 'level', item: l })
     }
 
     // Rule handlers
@@ -1107,8 +1159,7 @@ function EscalationSection() {
         } catch (err) { setError(err.message) }
     }
     const removeRule = async (r) => {
-        if (!confirm(t('adminPage.escalation.confirmDeleteRule', { id: r.id }))) return
-        try { await deleteEscalationRule(r.id); load() } catch (err) { alert(err.message) }
+        setConfirmDelete({ kind: 'rule', item: r })
     }
 
     const impactColor = (i) => i === 'high' ? '#ef4444' : i === 'medium' ? '#f59e0b' : '#10b981'
@@ -1119,6 +1170,37 @@ function EscalationSection() {
     return (
         <div className="admin-section">
             <h2 className="admin-title">{t('adminPage.escalation.title')}</h2>
+            {confirmDelete && (
+                <Modal title={t('common.confirm')} error={error} onClose={() => { setConfirmDelete(null); setError(''); }}>
+                    <div style={{ marginBottom: 14 }}>
+                        {confirmDelete.kind === 'level'
+                            ? t('adminPage.escalation.confirmDeleteLevel', { level: confirmDelete.item.level })
+                            : t('adminPage.escalation.confirmDeleteRule', { id: confirmDelete.item.id })}
+                    </div>
+                    <div className="form-actions">
+                        <button type="button" className="admin-btn" onClick={() => setConfirmDelete(null)}>{t('common.cancel')}</button>
+                        <button
+                            type="button"
+                            className="admin-btn danger"
+                            onClick={async () => {
+                                try {
+                                    if (confirmDelete.kind === 'level') {
+                                        await deleteEscalationLevel(confirmDelete.item.level)
+                                    } else {
+                                        await deleteEscalationRule(confirmDelete.item.id)
+                                    }
+                                    setConfirmDelete(null)
+                                    load()
+                                } catch (err) {
+                                    setError(err?.message || t('common.error'))
+                                }
+                            }}
+                        >
+                            {t('common.delete')}
+                        </button>
+                    </div>
+                </Modal>
+            )}
             {loading ? <div className="admin-loading">{t('common.loading')}</div> : (
                 <>
                     {/* Levels */}
@@ -1347,7 +1429,7 @@ function LiveEscalationsSection() {
                         userName={user?.full_name || user?.username}
                         embedded={true}
                         minimized={false}
-                        onMinimize={() => {}}
+                        onMinimize={() => { }}
                     />
                 </div>
             </div>
