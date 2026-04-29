@@ -20,3 +20,6 @@ python-jose[cryptography]>=3.3.0
 redis>=5.0.0
 # Decision Memory (vector retrieval) — optional; set DECISIO_DISABLE_RETRIEVAL=1 to skip
 qdrant-client>=1.7.0
+# File upload and document parsing
+python-multipart>=0.0.9
+pypdf>=4.0.0

@@ -39,21 +39,21 @@ export default function SuperAdminDashboard() {
 
     // Create company modal
     const [showCreateCompany, setShowCreateCompany] = useState(false)
-    const [companyForm, setCompanyForm] = useState({ name: '' })
+    const [companyForm, setCompanyForm] = useState({ name: '', expiry_date: '' })
 
     // Create admin modal
     const [showCreateAdmin, setShowCreateAdmin] = useState(false)
     const [selectedCompanyId, setSelectedCompanyId] = useState('')
-    const [adminForm, setAdminForm] = useState({ username: '', email: '', password: '', full_name: '' })
+    const [adminForm, setAdminForm] = useState({ username: '', email: '', password: '', full_name: '', contact_number: '' })
     const [sidebarOpen, setSidebarOpen] = useState(false)
 
     // Edit company modal
     const [showEditCompany, setShowEditCompany] = useState(false)
-    const [editCompanyForm, setEditCompanyForm] = useState({ id: null, name: '' })
+    const [editCompanyForm, setEditCompanyForm] = useState({ id: null, name: '', expiry_date: '' })
 
     // Edit admin modal
     const [showEditAdmin, setShowEditAdmin] = useState(false)
-    const [editAdminForm, setEditAdminForm] = useState({ id: null, company_id: '', email: '', full_name: '', password: '' })
+    const [editAdminForm, setEditAdminForm] = useState({ id: null, company_id: '', email: '', full_name: '', password: '', contact_number: '' })
     const [confirmAction, setConfirmAction] = useState(null) // { action: 'delete_admin'|'deactivate_company'|'activate_company', payload: any }
 
     const loadCompanies = () => {
@@ -86,9 +86,12 @@ export default function SuperAdminDashboard() {
         setError('')
         setSuccess('')
         try {
-            await superAdminCreateCompany(companyForm.name.trim())
+            await superAdminCreateCompany({
+                name: companyForm.name.trim(),
+                expiry_date: companyForm.expiry_date || undefined
+            })
             setSuccess(t('superAdmin.messages.companyCreated'))
-            setCompanyForm({ name: '' })
+            setCompanyForm({ name: '', expiry_date: '' })
             setShowCreateCompany(false)
             loadCompanies()
             setTimeout(() => setSuccess(''), 3000)
@@ -122,9 +125,10 @@ export default function SuperAdminDashboard() {
                 email: adminForm.email.trim(),
                 password: adminForm.password,
                 full_name: adminForm.full_name.trim(),
+                contact_number: adminForm.contact_number.trim(),
             })
             setSuccess(t('superAdmin.messages.adminCreated'))
-            setAdminForm({ username: '', email: '', password: '', full_name: '' })
+            setAdminForm({ username: '', email: '', password: '', full_name: '', contact_number: '' })
             setSelectedCompanyId('')
             setShowCreateAdmin(false)
             loadAdmins()
@@ -177,7 +181,7 @@ export default function SuperAdminDashboard() {
     }
 
     const openEditCompany = (company) => {
-        setEditCompanyForm({ id: company.id, name: company.name })
+        setEditCompanyForm({ id: company.id, name: company.name, expiry_date: company.expiry_date ? company.expiry_date.split('T')[0] : '' })
         setShowEditCompany(true)
         setError('')
     }
@@ -187,7 +191,10 @@ export default function SuperAdminDashboard() {
         setError('')
         setSuccess('')
         try {
-            await superAdminUpdateCompany(editCompanyForm.id, { name: editCompanyForm.name.trim() })
+            await superAdminUpdateCompany(editCompanyForm.id, {
+                name: editCompanyForm.name.trim(),
+                expiry_date: editCompanyForm.expiry_date || null
+            })
             setSuccess(t('superAdmin.messages.companyUpdated'))
             setShowEditCompany(false)
             loadCompanies()
@@ -204,6 +211,7 @@ export default function SuperAdminDashboard() {
             email: admin.email,
             full_name: admin.full_name || '',
             password: '',
+            contact_number: admin.contact_number || '',
         })
         setShowEditAdmin(true)
         setError('')
@@ -213,7 +221,11 @@ export default function SuperAdminDashboard() {
         e.preventDefault()
         setError('')
         setSuccess('')
-        const payload = { email: editAdminForm.email.trim(), full_name: editAdminForm.full_name.trim() }
+        const payload = {
+            email: editAdminForm.email.trim(),
+            full_name: editAdminForm.full_name.trim(),
+            contact_number: editAdminForm.contact_number.trim()
+        }
         const cid = parseInt(editAdminForm.company_id, 10)
 
         const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
@@ -231,7 +243,7 @@ export default function SuperAdminDashboard() {
         try {
             await superAdminUpdateAdmin(editAdminForm.id, payload)
             setSuccess(t('superAdmin.messages.adminUpdated'))
-            setEditAdminForm({ id: null, company_id: '', email: '', full_name: '', password: '' })
+            setEditAdminForm({ id: null, company_id: '', email: '', full_name: '', password: '', contact_number: '' })
             setShowEditAdmin(false)
             loadAdmins()
             setTimeout(() => setSuccess(''), 3000)
@@ -326,7 +338,7 @@ export default function SuperAdminDashboard() {
                     {/* Companies */}
                     <div className="admin-header-row">
                         <h3 className="admin-subtitle">{t('superAdmin.companies')}</h3>
-                        <button className="admin-btn primary" onClick={() => { setShowCreateCompany(true); setError(''); setCompanyForm({ name: '' }) }}>
+                        <button className="admin-btn primary" onClick={() => { setShowCreateCompany(true); setError(''); setCompanyForm({ name: '', expiry_date: '' }) }}>
                             {t('superAdmin.actions.createCompany')}
                         </button>
                     </div>
@@ -340,7 +352,7 @@ export default function SuperAdminDashboard() {
                                     <tr>
                                         <th>{t('superAdmin.table.id')}</th>
                                         <th>{t('superAdmin.table.name')}</th>
-
+                                        <th>Expiry Date</th>
                                         <th>{t('superAdmin.table.status')}</th>
                                         <th>{t('superAdmin.table.actions')}</th>
                                     </tr>
@@ -352,7 +364,7 @@ export default function SuperAdminDashboard() {
                                         <tr key={c.id}>
                                             <td className="td-mono">{c.id}</td>
                                             <td className="td-bold">{c.name}</td>
-
+                                            <td>{c.expiry_date ? new Date(c.expiry_date).toLocaleDateString() : '—'}</td>
                                             <td><span className={`status-badge ${c.is_active ? 'active' : 'inactive'}`}>{c.is_active ? t('common.active') : t('common.inactive')}</span></td>
                                             <td>
                                                 <button type="button" className="admin-btn" style={{ padding: '4px 10px', fontSize: 12, marginInlineEnd: 6 }} onClick={() => openEditCompany(c)}>{t('common.edit')}</button>
@@ -377,7 +389,7 @@ export default function SuperAdminDashboard() {
                             onClick={() => {
                                 setShowCreateAdmin(true)
                                 setError('')
-                                setAdminForm({ username: '', email: '', password: '', full_name: '' })
+                                setAdminForm({ username: '', email: '', password: '', full_name: '', contact_number: '' })
                                 const withoutAdmin = companies.find(c => !admins.some(a => a.company_id === c.id))
                                 setSelectedCompanyId(withoutAdmin?.id ? String(withoutAdmin.id) : '')
                             }}
@@ -406,6 +418,7 @@ export default function SuperAdminDashboard() {
                                         <th>{t('superAdmin.adminTable.email')}</th>
                                         <th>{t('superAdmin.adminTable.fullName')}</th>
                                         <th>{t('superAdmin.adminTable.company')}</th>
+                                        <th>Contact Number</th>
                                         <th>{t('superAdmin.table.status')}</th>
                                         <th>{t('superAdmin.table.actions')}</th>
                                     </tr>
@@ -420,6 +433,7 @@ export default function SuperAdminDashboard() {
                                             <td>{a.email}</td>
                                             <td>{a.full_name || '—'}</td>
                                             <td>{a.company_name}</td>
+                                            <td>{a.contact_number || '—'}</td>
                                             <td><span className={`status-badge ${a.is_active ? 'active' : 'inactive'}`}>{a.is_active ? t('common.active') : t('common.inactive')}</span></td>
                                             <td>
                                                 {a.is_active && (
@@ -447,8 +461,15 @@ export default function SuperAdminDashboard() {
                             <input
                                 value={companyForm.name}
                                 onChange={e => setCompanyForm({ ...companyForm, name: e.target.value })}
-
                                 required
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Expiry Date</label>
+                            <input
+                                type="date"
+                                value={companyForm.expiry_date}
+                                onChange={e => setCompanyForm({ ...companyForm, expiry_date: e.target.value })}
                             />
                         </div>
 
@@ -514,6 +535,14 @@ export default function SuperAdminDashboard() {
                                 placeholder={t('common.optional')}
                             />
                         </div>
+                        <div className="form-group">
+                            <label>Contact Number</label>
+                            <input
+                                value={adminForm.contact_number}
+                                onChange={e => setAdminForm({ ...adminForm, contact_number: e.target.value })}
+                                placeholder={t('common.optional')}
+                            />
+                        </div>
                         <div className="form-actions">
                             <button type="button" className="admin-btn" onClick={() => { setShowCreateAdmin(false); setError(''); }}>{t('common.cancel')}</button>
                             <button type="submit" className="admin-btn primary">{t('superAdmin.actions.createAdmin')}</button>
@@ -530,8 +559,15 @@ export default function SuperAdminDashboard() {
                             <input
                                 value={editCompanyForm.name}
                                 onChange={e => setEditCompanyForm({ ...editCompanyForm, name: e.target.value })}
-
                                 required
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Expiry Date</label>
+                            <input
+                                type="date"
+                                value={editCompanyForm.expiry_date}
+                                onChange={e => setEditCompanyForm({ ...editCompanyForm, expiry_date: e.target.value })}
                             />
                         </div>
                         <div className="form-actions">
@@ -581,7 +617,14 @@ export default function SuperAdminDashboard() {
                                 type="password"
                                 value={editAdminForm.password}
                                 onChange={e => setEditAdminForm({ ...editAdminForm, password: e.target.value })}
-
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Contact Number</label>
+                            <input
+                                value={editAdminForm.contact_number}
+                                onChange={e => setEditAdminForm({ ...editAdminForm, contact_number: e.target.value })}
+                                placeholder={t('common.optional')}
                             />
                         </div>
                         <div className="form-actions">

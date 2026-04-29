@@ -143,9 +143,9 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
         return t('userPage.placeholders.default')
     }
 
-    const handleSubmit = async (e) => {
-        e.preventDefault()
-        const text = input.trim()
+    const handleSubmit = async (e, customText = null) => {
+        if (e) e.preventDefault()
+        const text = customText !== null ? customText : input.trim()
         if (!text || loading) return
 
         setInput('')
@@ -359,11 +359,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
     const handleOutcomeButton = (outcome, selectedOptionId = null) => {
         outcomeSelectedOptionIdRef.current = selectedOptionId
-        setInput(outcome)
-        setTimeout(() => {
-            const form = document.querySelector('form')
-            if (form) form.requestSubmit()
-        }, 50)
+        handleSubmit(null, outcome)
     }
 
     return (
@@ -593,7 +589,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                     )}
 
                     {/* Input Area — ChatGPT-style pill bar */}
-                    {phase !== 'closed' && phase !== 'escalation_chat' && (
+                    {phase !== 'closed' && phase !== 'escalation_chat' && !(phase === 'outcome' && incident?.decision_brief?.options?.length > 0) && (
                         <div className="gpt-input-wrapper">
                             <form className="gpt-input-pill" onSubmit={handleSubmit}>
                                 <textarea

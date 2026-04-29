@@ -19,7 +19,7 @@ from datetime import datetime,timezone
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI,HTTPException,Depends
+from fastapi import FastAPI,HTTPException,Depends,UploadFile,File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel,Field
@@ -1572,6 +1572,130 @@ async def delete_equipment(equipment_id: str,admin: TokenData = Depends(require_
         return {"message": f"Equipment '{equipment_id.upper()}' deleted"}
 
 
+# ── Equipment Manual Upload (Qdrant) ──────────────────────────────────
+
+ALLOWED_MANUAL_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt"}
+MAX_MANUAL_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+@app.post("/api/admin/equipment/{equipment_id}/manual")
+async def upload_equipment_manual(
+    equipment_id: str,
+    file: UploadFile = File(...),
+    admin: TokenData = Depends(require_company_admin),
+):
+    """
+    Upload a manual (PDF/DOCX/TXT) for a specific piece of equipment.
+    The file is chunked, embedded and stored in Qdrant with metadata
+    (company_id, equipment_id, memory_type='manual').
+    """
+    import os as _os
+    ext = _os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_MANUAL_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported file type '{ext}'. Allowed: {', '.join(ALLOWED_MANUAL_EXTENSIONS)}")
+
+    content = await file.read()
+    if len(content) > MAX_MANUAL_SIZE_BYTES:
+        raise HTTPException(413, "File too large. Maximum allowed size is 10 MB.")
+    if not content:
+        raise HTTPException(400, "Empty file.")
+
+    # Verify equipment belongs to this company
+    async with get_session() as session:
+        result = await session.execute(
+            sa_select(Equipment)
+            .where(Equipment.id == equipment_id.upper())
+            .where(Equipment.company_id == admin.company_id)
+        )
+        eq = result.scalar_one_or_none()
+        if not eq:
+            raise HTTPException(404, "Equipment not found")
+        eq_name = eq.name
+
+    # Run in a thread pool since embedding is synchronous / CPU-bound
+    import asyncio
+    from src.services.manual_service import ingest_manual
+
+    try:
+        chunk_count = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: ingest_manual(
+                company_id=admin.company_id,
+                equipment_id=equipment_id,
+                equipment_name=eq_name,
+                filename=file.filename or "manual",
+                content=content,
+            ),
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+    return {
+        "message": f"Manual uploaded for '{equipment_id.upper()}'",
+        "equipment_id": equipment_id.upper(),
+        "chunks_stored": chunk_count,
+        "filename": file.filename,
+    }
+
+
+@app.delete("/api/admin/equipment/{equipment_id}/manual")
+async def delete_equipment_manual(
+    equipment_id: str,
+    admin: TokenData = Depends(require_company_admin),
+):
+    """Delete the uploaded manual for a piece of equipment from Qdrant."""
+    # Verify ownership
+    async with get_session() as session:
+        result = await session.execute(
+            sa_select(Equipment)
+            .where(Equipment.id == equipment_id.upper())
+            .where(Equipment.company_id == admin.company_id)
+        )
+        if not result.scalar_one_or_none():
+            raise HTTPException(404, "Equipment not found")
+
+    import asyncio
+    from src.services.manual_service import delete_manual
+
+    await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: delete_manual(company_id=admin.company_id, equipment_id=equipment_id),
+    )
+    return {"message": f"Manual for '{equipment_id.upper()}' deleted"}
+
+
+@app.get("/api/admin/equipment/{equipment_id}/manual/status")
+async def get_equipment_manual_status(
+    equipment_id: str,
+    admin: TokenData = Depends(require_company_admin),
+):
+    """Return how many manual chunks are stored for a piece of equipment."""
+    # Verify ownership
+    async with get_session() as session:
+        result = await session.execute(
+            sa_select(Equipment)
+            .where(Equipment.id == equipment_id.upper())
+            .where(Equipment.company_id == admin.company_id)
+        )
+        if not result.scalar_one_or_none():
+            raise HTTPException(404, "Equipment not found")
+
+    from src.services.manual_service import get_manual_chunk_count
+
+    count = get_manual_chunk_count(
+        company_id=admin.company_id,
+        equipment_id=equipment_id,
+    )
+    return {
+        "equipment_id": equipment_id.upper(),
+        "has_manual": count > 0,
+        "chunk_count": count,
+    }
+
+
+
 # ── Admin CRUD — Safety Rules ──────────────────────────────────────
 
 class SafetyRuleRequest(BaseModel):
@@ -1815,6 +1939,7 @@ class RegisterRequest(BaseModel):
     password: str = Field(...,min_length=8,max_length=128)
     full_name: str = Field(default="",max_length=200)
     user_type: str = Field(default="operator",max_length=30)
+    contact_number: str = Field(default="",max_length=32)
 
 
 class UpdateUserRequest(BaseModel):
@@ -1823,6 +1948,7 @@ class UpdateUserRequest(BaseModel):
     user_type: Optional[str] = Field(default=None,max_length=30)
     is_active: Optional[bool] = None
     password: Optional[str] = Field(default=None,min_length=8,max_length=128)
+    contact_number: Optional[str] = Field(default=None,max_length=32)
 
 
 def _user_to_dict(u: User) -> dict:
@@ -1833,6 +1959,7 @@ def _user_to_dict(u: User) -> dict:
         "email": u.email,
         "full_name": u.full_name,
         "user_type": u.user_type,
+        "contact_number": u.contact_number or "",
         "is_active": u.is_active,
         "created_at": u.created_at.isoformat() if u.created_at else "",
     }
@@ -1987,6 +2114,7 @@ async def create_user(req: RegisterRequest,admin: TokenData = Depends(require_co
             hashed_password=hash_password(req.password),
             full_name=req.full_name,
             user_type=req.user_type,
+            contact_number=req.contact_number or "",
             is_active=True,
         )
         session.add(user)
@@ -2021,6 +2149,8 @@ async def update_user(user_id: int,req: UpdateUserRequest,admin: TokenData = Dep
             user.is_active = req.is_active
         if req.password is not None:
             user.hashed_password = hash_password(req.password)
+        if req.contact_number is not None:
+            user.contact_number = req.contact_number
 
         await session.flush()
         return {"user": _user_to_dict(user),"message": "User updated"}
@@ -2235,6 +2365,7 @@ async def get_kpi_stats(admin: TokenData = Depends(require_company_admin)):
 
 class CompanyRequest(BaseModel):
     name: str
+    expiry_date: Optional[str] = None
 
 
 class CreateCompanyAdminRequest(BaseModel):
@@ -2243,6 +2374,7 @@ class CreateCompanyAdminRequest(BaseModel):
     email: str
     password: str = Field(...,min_length=8,max_length=128)
     full_name: str = ""
+    contact_number: str = Field(default="",max_length=32)
 
 
 @app.get("/api/super-admin/companies")
@@ -2259,6 +2391,7 @@ async def super_admin_list_companies(super_admin: TokenData = Depends(require_su
                     "id": c.id,
                     "name": c.name,
                     "is_active": c.is_active,
+                    "expiry_date": c.expiry_date.isoformat() if c.expiry_date else None,
                     "created_at": c.created_at.isoformat() if c.created_at else "",
                 }
                 for c in companies
@@ -2285,6 +2418,7 @@ async def super_admin_list_admins(super_admin: TokenData = Depends(require_super
                     "email": u.email,
                     "full_name": u.full_name,
                     "user_type": u.user_type,
+                    "contact_number": u.contact_number or "",
                     "is_active": u.is_active,
                     "company_id": u.company_id,
                     "company_name": company_name or "—",
@@ -2310,6 +2444,7 @@ async def super_admin_create_company(req: CompanyRequest,super_admin: TokenData 
         company = Company(
             name=req.name,
             is_active=True,
+            expiry_date=datetime.fromisoformat(req.expiry_date) if req.expiry_date else None,
         )
         session.add(company)
         await session.flush()
@@ -2343,6 +2478,8 @@ async def super_admin_update_company(
         if existing.first():
             raise HTTPException(409,"Company name already in use by another company")
         company.name = req.name.strip()
+        if req.expiry_date is not None:
+            company.expiry_date = datetime.fromisoformat(req.expiry_date) if req.expiry_date else None
         await session.flush()
         return {
             "company": {"id": company.id,"name": company.name,},
@@ -2356,6 +2493,7 @@ class UpdateCompanyAdminRequest(BaseModel):
     email: Optional[str] = None
     full_name: Optional[str] = None
     password: Optional[str] = Field(default=None,min_length=8,max_length=128)
+    contact_number: Optional[str] = Field(default=None,max_length=32)
 
 
 @app.put("/api/super-admin/admins/{user_id}")
@@ -2395,6 +2533,8 @@ async def super_admin_update_admin(
             target.full_name = req.full_name.strip()
         if req.password is not None:
             target.hashed_password = hash_password(req.password)
+        if req.contact_number is not None:
+            target.contact_number = req.contact_number
         await session.flush()
         return {"user": _user_to_dict(target),"message": "Admin updated successfully"}
 
@@ -2432,6 +2572,7 @@ async def super_admin_create_company_admin(
             email=req.email,
             hashed_password=hash_password(req.password),
             full_name=req.full_name,
+            contact_number=req.contact_number or "",
             user_type="admin",
             is_active=True,
         )
@@ -2536,6 +2677,7 @@ async def list_companies(admin: TokenData = Depends(require_admin)):
                     "id": c.id,
                     "name": c.name,
                     "is_active": c.is_active,
+                    "expiry_date": c.expiry_date.isoformat() if c.expiry_date else None,
                     "created_at": c.created_at.isoformat() if c.created_at else "",
                 }
                 for c in companies
@@ -2558,6 +2700,7 @@ async def create_company(req: CompanyRequest,admin: TokenData = Depends(require_
         company = Company(
             name=req.name,
             is_active=True,
+            expiry_date=datetime.fromisoformat(req.expiry_date) if req.expiry_date else None,
         )
         session.add(company)
         await session.flush()
@@ -2594,6 +2737,7 @@ async def get_current_company(user: TokenData = Depends(require_auth)):
             "id": company.id,
             "name": company.name,
             "is_active": company.is_active,
+            "expiry_date": company.expiry_date.isoformat() if company.expiry_date else None,
         }
 
 

@@ -193,27 +193,29 @@ MIN_SIMILARITY_THRESHOLD = 0.6
 MEMORY_GUIDANCE_THRESHOLD = 0.75
 
 
+from functools import lru_cache
+
 def _build_query_text(state: DecisioState) -> str:
-    """Compose embedding text from incident + optional recent Q&A for richer matching."""
+    """Compose embedding text from incident for highly stable caching."""
     incident_card = state.get("incident_card") or {}
     summary = incident_card.get("normalized_summary", incident_card.get("report", ""))
     symptoms = incident_card.get("symptoms", [])
     parts = [f"{summary}. Symptoms: {', '.join(symptoms) if symptoms else 'none'}"]
-    qa_history = state.get("qa_history") or []
-    if qa_history:
-        tail = qa_history[-4:]
-        bits = []
-        for qa in tail:
-            q = str(qa.get("question", ""))[:200]
-            a = str(qa.get("answer", ""))[:200]
-            if q or a:
-                bits.append(f"Q: {q} A: {a}")
-        if bits:
-            parts.append("Recent diagnostics: " + " | ".join(bits))
+    
     asset = (incident_card.get("asset_id") or "").strip()
     if asset:
         parts.append(f"Asset: {asset}")
     return " ".join(parts)
+
+
+@lru_cache(maxsize=128)
+def _get_cached_embedding(query_text: str) -> list:
+    embedder = _get_embedder()
+    if not embedder:
+        return []
+    vec = embedder.encode(query_text)
+    return vec.tolist() if hasattr(vec, "tolist") else list(vec)
+
 
 
 def retrieval_agent(state: DecisioState) -> DecisioState:
@@ -260,8 +262,16 @@ def retrieval_agent(state: DecisioState) -> DecisioState:
             if point_count == 0:
                 logger.info("Decision Memory is empty — no patterns to retrieve.")
             else:
-                vec = embedder.encode(query_text)
-                vector = vec.tolist() if hasattr(vec, "tolist") else list(vec)
+                vector = _get_cached_embedding(query_text)
+                if not vector:
+                    return {
+                        "retrieved_patterns": [],
+                        "retrieval_confidence": 0.0,
+                        "memory_guidance": None,
+                        "current_node": "retrieval",
+                        "status": "DIAGNOSING",
+                    }
+                
                 # Safety check: if Qdrant collection size doesn't match embedding dim, skip retrieval.
                 try:
                     expected_dim = _get_embedding_dimension(existing_client=client)

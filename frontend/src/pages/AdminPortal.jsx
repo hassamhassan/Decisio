@@ -4,6 +4,7 @@ import {
     listEquipment, listSafetyRules, getEscalationMatrix, listIncidentReports,
     listIncidents, getIncident, logout, getStoredUser,
     createEquipment, updateEquipment, deleteEquipment,
+    uploadEquipmentManual, deleteEquipmentManual, getEquipmentManualStatus,
     createSafetyRule, updateSafetyRule, deleteSafetyRule,
     createEscalationLevel, updateEscalationLevel, deleteEscalationLevel,
     createEscalationRule, updateEscalationRule, deleteEscalationRule,
@@ -474,7 +475,7 @@ function UsersSection() {
     const [loading, setLoading] = useState(true)
     const [showForm, setShowForm] = useState(false)
     const [editUser, setEditUser] = useState(null)
-    const [form, setForm] = useState({ username: '', email: '', password: '', full_name: '', user_type: 'viewer' })
+    const [form, setForm] = useState({ username: '', email: '', password: '', full_name: '', user_type: 'viewer', contact_number: '' })
     const [error, setError] = useState('')
     const [escalationLevels, setEscalationLevels] = useState([])
     const [confirmAction, setConfirmAction] = useState(null)
@@ -508,23 +509,24 @@ function UsersSection() {
             if (editUser) {
                 const update = {}
                 if (form.email) update.email = form.email
-                if (form.full_name) update.full_name = form.full_name
+                if (form.full_name !== undefined) update.full_name = form.full_name
                 if (form.user_type) update.user_type = form.user_type
                 if (form.password) update.password = form.password
+                if (form.contact_number !== undefined) update.contact_number = form.contact_number
                 await updateUser(editUser.id, update)
             } else {
                 await createUser(form)
             }
             setShowForm(false)
             setEditUser(null)
-            setForm({ username: '', email: '', password: '', full_name: '', user_type: 'viewer' })
+            setForm({ username: '', email: '', password: '', full_name: '', user_type: 'viewer', contact_number: '' })
             loadUsers()
         } catch (err) { setError(err.message) }
     }
 
     const handleEdit = (u) => {
         setEditUser(u)
-        setForm({ username: u.username, email: u.email, password: '', full_name: u.full_name, user_type: u.user_type })
+        setForm({ username: u.username, email: u.email, password: '', full_name: u.full_name, user_type: u.user_type, contact_number: u.contact_number || '' })
         setShowForm(true)
     }
 
@@ -564,6 +566,7 @@ function UsersSection() {
                         {!editUser && <div className="form-group"><label>{t('adminPage.users.fields.username')}</label><input value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} required /></div>}
                         <div className="form-group"><label>{t('adminPage.users.fields.email')}</label><input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required={!editUser} /></div>
                         <div className="form-group"><label>{t('adminPage.users.fields.fullName')}</label><input value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} /></div>
+                        <div className="form-group"><label>Contact Number</label><input value={form.contact_number} onChange={e => setForm({ ...form, contact_number: e.target.value })} /></div>
                         <div className="form-group"><label>{t('adminPage.users.fields.password')} {editUser && `(${t('adminPage.users.fields.keepBlank')})`}</label><input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required={!editUser} /></div>
                         <div className="form-group"><label>{t('adminPage.users.fields.userType')}</label>
                             <select value={form.user_type} onChange={e => setForm({ ...form, user_type: e.target.value })}>
@@ -603,13 +606,14 @@ function UsersSection() {
             {loading ? <div className="admin-loading">{t('adminPage.users.loading')}</div> : (
                 <div className="admin-table-wrap">
                     <table className="admin-table">
-                        <thead><tr><th>{t('adminPage.users.table.username')}</th><th>{t('adminPage.users.table.fullName')}</th><th>{t('adminPage.users.table.email')}</th><th>{t('adminPage.users.table.type')}</th><th>{t('adminPage.users.table.status')}</th><th>{t('adminPage.users.table.created')}</th><th>{t('adminPage.users.table.actions')}</th></tr></thead>
+                        <thead><tr><th>{t('adminPage.users.table.username')}</th><th>{t('adminPage.users.table.fullName')}</th><th>{t('adminPage.users.table.email')}</th><th>Contact Number</th><th>{t('adminPage.users.table.type')}</th><th>{t('adminPage.users.table.status')}</th><th>{t('adminPage.users.table.created')}</th><th>{t('adminPage.users.table.actions')}</th></tr></thead>
                         <tbody>
                             {users.map(u => (
                                 <tr key={u.id} className={!u.is_active ? 'inactive-row' : ''}>
                                     <td className="td-bold">{u.username}</td>
                                     <td>{u.full_name || '—'}</td>
                                     <td>{u.email}</td>
+                                    <td>{u.contact_number || '—'}</td>
                                     <td><span className="user-type-badge" style={{ background: userTypeColor(u.user_type) }}>{u.user_type}</span></td>
                                     <td><span className={`status-badge ${u.is_active ? 'active' : 'inactive'}`}>{u.is_active ? t('common.active') : t('common.inactive')}</span></td>
                                     <td>{new Date(u.created_at).toLocaleDateString()}</td>
@@ -836,8 +840,28 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
     const [form, setForm] = useState({ id: '', name: '', equipment_type: 'rotating', process_line: 'Line A', criticality: 'medium', description: '', upstream_id: '', downstream_id: '' })
     const [error, setError] = useState('')
     const [confirmDelete, setConfirmDelete] = useState(null) // equipment row
+    const [manualStatuses, setManualStatuses] = useState({})
+    const [showManualModal, setShowManualModal] = useState(false)
+    const [manualTarget, setManualTarget] = useState(null)
+    const [uploadFile, setUploadFile] = useState(null)
+    const [uploading, setUploading] = useState(false)
+    const [uploadProgress, setUploadProgress] = useState('')
 
-    const load = () => { setLoading(true); listEquipment().then(d => setEquipment(d.equipment || [])).catch(console.error).finally(() => setLoading(false)) }
+    const load = () => {
+        setLoading(true);
+        listEquipment().then(async d => {
+            const eqs = d.equipment || [];
+            setEquipment(eqs);
+            const statuses = { ...manualStatuses };
+            await Promise.all(eqs.map(async (eq) => {
+                try {
+                    const st = await getEquipmentManualStatus(eq.id);
+                    statuses[eq.id] = st.has_manual;
+                } catch (e) { }
+            }));
+            setManualStatuses(statuses);
+        }).catch(console.error).finally(() => setLoading(false))
+    }
     useEffect(() => { load() }, [])
 
     const openCreate = (prefill = '') => {
@@ -890,6 +914,48 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
 
     const handleDelete = async (eq) => {
         setConfirmDelete(eq)
+    }
+
+    const openManualModal = (eq) => {
+        setManualTarget(eq);
+        setShowManualModal(true);
+        setUploadFile(null);
+        setError('');
+        setUploadProgress('');
+    }
+
+    const handleManualUpload = async (e) => {
+        e.preventDefault();
+        if (!uploadFile) return;
+        setError('');
+        setUploading(true);
+        setUploadProgress('Uploading and processing...');
+        try {
+            await uploadEquipmentManual(manualTarget.id, uploadFile);
+            setShowManualModal(false);
+            setUploadFile(null);
+            load();
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setUploading(false);
+            setUploadProgress('');
+        }
+    }
+
+    const handleManualDelete = async () => {
+        if (!window.confirm(`Delete manual for ${manualTarget.name}?`)) return;
+        setError('');
+        setUploading(true);
+        try {
+            await deleteEquipmentManual(manualTarget.id);
+            setShowManualModal(false);
+            load();
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setUploading(false);
+        }
     }
 
     const critColor = (c) => c === 'critical' ? '#ef4444' : c === 'high' ? '#f59e0b' : c === 'medium' ? '#3b82f6' : '#6b7280'
@@ -961,10 +1027,32 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
                 </Modal>
             )}
 
+            {showManualModal && manualTarget && (
+                <Modal title={`Manual: ${manualTarget.name}`} error={error} onClose={() => { if (!uploading) setShowManualModal(false); setError(''); }}>
+                    <form onSubmit={handleManualUpload}>
+                        <div className="form-group">
+                            <label>File (.pdf, .docx, .txt)</label>
+                            <input type="file" accept=".pdf,.docx,.txt" onChange={e => setUploadFile(e.target.files[0])} disabled={uploading} />
+                        </div>
+                        {uploadProgress && <div style={{ marginBottom: 10, color: '#3b82f6', fontSize: '0.9rem' }}>{uploadProgress}</div>}
+
+                        <div className="form-actions" style={{ justifyContent: manualStatuses[manualTarget.id] ? 'space-between' : 'flex-end', marginTop: 24 }}>
+                            {manualStatuses[manualTarget.id] && (
+                                <button type="button" className="admin-btn danger" onClick={handleManualDelete} disabled={uploading}>Delete Manual</button>
+                            )}
+                            <div>
+                                <button type="button" className="admin-btn" style={{ marginRight: 8 }} onClick={() => { if (!uploading) setShowManualModal(false); }} disabled={uploading}>{t('common.cancel')}</button>
+                                <button type="submit" className="admin-btn primary" disabled={!uploadFile || uploading}>Upload</button>
+                            </div>
+                        </div>
+                    </form>
+                </Modal>
+            )}
+
             {loading ? <div className="admin-loading">{t('common.loading')}</div> : (
                 <div className="admin-table-wrap">
                     <table className="admin-table">
-                        <thead><tr><th>{t('adminPage.equipment.table.id')}</th><th>{t('adminPage.equipment.table.name')}</th><th>{t('adminPage.equipment.table.type')}</th><th>{t('adminPage.equipment.table.line')}</th><th>{t('adminPage.equipment.table.criticality')}</th><th>{t('adminPage.equipment.table.upstream')}</th><th>{t('adminPage.equipment.table.downstream')}</th><th>{t('adminPage.equipment.table.actions')}</th></tr></thead>
+                        <thead><tr><th>{t('adminPage.equipment.table.id')}</th><th>{t('adminPage.equipment.table.name')}</th><th>{t('adminPage.equipment.table.type')}</th><th>{t('adminPage.equipment.table.line')}</th><th>{t('adminPage.equipment.table.criticality')}</th><th>{t('adminPage.equipment.table.upstream')}</th><th>{t('adminPage.equipment.table.downstream')}</th><th>Manual</th><th>{t('adminPage.equipment.table.actions')}</th></tr></thead>
                         <tbody>
                             {equipment.map(eq => (
                                 <tr key={eq.id}>
@@ -975,7 +1063,9 @@ function EquipmentSection({ openCreateNonce, prefillId }) {
                                     <td><span style={{ color: critColor(eq.criticality), fontWeight: 600 }}>{eq.criticality}</span></td>
                                     <td>{eq.upstream_id || '—'}</td>
                                     <td>{eq.downstream_id || '—'}</td>
+                                    <td>{manualStatuses[eq.id] ? <span style={{ color: '#10b981', fontWeight: 600, fontSize: '0.85rem', padding: '2px 6px', backgroundColor: '#ecfdf5', borderRadius: 4 }}>Uploaded</span> : <span style={{ color: '#9ca3af', fontSize: '0.85rem' }}>None</span>}</td>
                                     <td>
+                                        <button className="admin-btn-sm" onClick={() => openManualModal(eq)}>Manual</button>
                                         <button className="admin-btn-sm" onClick={() => openEdit(eq)}>{t('common.edit')}</button>
                                         <button className="admin-btn-sm danger" onClick={() => handleDelete(eq)}>{t('common.delete')}</button>
                                     </td>

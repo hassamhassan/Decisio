@@ -324,6 +324,26 @@ def question_agent(state: DecisioState) -> DecisioState:
     if process_failure_indicators:
         context_parts.append(f"Indicators: {', '.join(process_failure_indicators)}")
 
+    # ── Manual context from Qdrant manuals collection ─────────────────
+    if incident_asset and company_id is not None:
+        try:
+            from src.services.manual_service import retrieve_manual_chunks
+            query = reported_symptoms or problem_description or incident_card.get("normalized_summary", "")
+            manual_chunks = retrieve_manual_chunks(
+                equipment_id=incident_asset,
+                query_text=query,
+                company_id=int(company_id),
+                limit=5,
+            )
+            if manual_chunks:
+                context_parts += ["", "=== EQUIPMENT MANUAL CONTEXT (use this for precise component names & procedures) ==="]
+                for chunk in manual_chunks:
+                    context_parts.append(f"[From manual, relevance {chunk['score']:.0%}]")
+                    context_parts.append(chunk["text"])
+        except Exception as _manual_err:
+            import logging as _log
+            _log.getLogger(__name__).debug("Manual retrieval skipped: %s", _manual_err)
+
     context_parts += [
         "",
         f"=== CURRENT DIAGNOSTIC STEP ===",

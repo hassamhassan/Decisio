@@ -38,6 +38,7 @@ class Company(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(128), unique=True, nullable=False)
     is_active = Column(Boolean, default=True)
+    expiry_date = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
@@ -69,6 +70,7 @@ class User(Base):
     hashed_password = Column(String(256), nullable=False)
     full_name = Column(String(128), default="")
     user_type = Column(String(16), default="operator")  # admin/operator/engineer/viewer
+    contact_number = Column(String(32), default="")
     is_active = Column(Boolean, default=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

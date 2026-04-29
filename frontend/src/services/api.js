@@ -151,7 +151,31 @@ export async function deleteEquipment(equipmentId) {
     });
 }
 
-// ── Admin Safety Rules CRUD ────────────────────────────────────────
+export async function uploadEquipmentManual(equipmentId, file) {
+    const token = getToken();
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/admin/equipment/${equipmentId}/manual`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.detail || `Upload failed (${res.status})`);
+    return data;
+}
+
+export async function deleteEquipmentManual(equipmentId) {
+    return apiFetch(`${API_BASE}/admin/equipment/${equipmentId}/manual`, {
+        method: 'DELETE',
+    });
+}
+
+export async function getEquipmentManualStatus(equipmentId) {
+    return apiFetch(`${API_BASE}/admin/equipment/${equipmentId}/manual/status`);
+}
+
+
 
 export async function createSafetyRule(data) {
     return apiFetch(`${API_BASE}/admin/safety-rules`, {
@@ -295,10 +319,10 @@ export async function superAdminListCompanies() {
     return apiFetch(`${API_BASE}/super-admin/companies`);
 }
 
-export async function superAdminCreateCompany(name) {
+export async function superAdminCreateCompany(data) {
     return apiFetch(`${API_BASE}/super-admin/companies`, {
         method: 'POST',
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(data),
     });
 }
 
