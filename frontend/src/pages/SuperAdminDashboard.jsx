@@ -539,7 +539,7 @@ export default function SuperAdminDashboard() {
                             <label>Contact Number</label>
                             <input
                                 value={adminForm.contact_number}
-                                onChange={e => setAdminForm({ ...adminForm, contact_number: e.target.value })}
+                                onChange={e => { const v = e.target.value; if (/^[+\d]*$/.test(v)) setAdminForm({ ...adminForm, contact_number: v }) }}
                                 placeholder={t('common.optional')}
                             />
                         </div>
@@ -623,7 +623,7 @@ export default function SuperAdminDashboard() {
                             <label>Contact Number</label>
                             <input
                                 value={editAdminForm.contact_number}
-                                onChange={e => setEditAdminForm({ ...editAdminForm, contact_number: e.target.value })}
+                                onChange={e => { const v = e.target.value; if (/^[+\d]*$/.test(v)) setEditAdminForm({ ...editAdminForm, contact_number: v }) }}
                                 placeholder={t('common.optional')}
                             />
                         </div>

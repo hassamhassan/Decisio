@@ -19,7 +19,11 @@ from src.llm import get_llm_for_brief
 from src.state.state import DecisionBrief, DecisionOption, DecisioState
 from src.sanitization import sanitize_decision_brief
 from src.data.escalation_matrix import get_escalation_levels
-from src.agents.prompt_context import format_retrieved_patterns_for_llm, get_language_instruction
+from src.agents.prompt_context import (
+    format_fact_line,
+    format_retrieved_patterns_for_llm,
+    get_language_instruction,
+)
 
 DECISION_BRIEF_PATTERN_PROMPT_CAP = 4
 
@@ -28,78 +32,87 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """\
 You are the Decision Brief Agent for Decisio, an operational decision-support system.
 
-You are advising on a specific piece of equipment (for example CMP-01) that has
-already gone through a structured diagnostic question flow. Your job is to
-summarise the findings and propose clear, machine-focused decision options.
+You have access to a completed diagnostic Q&A session, hypotheses, facts, and
+equipment manual excerpts. Your job is to deliver three CONCRETE, ACTIONABLE
+decision options about what should be done with this specific asset RIGHT NOW.
 
-CRITICAL BOUNDARY: You must NEVER include:
-- Repair steps or procedures
-- Disassembly instructions
-- Command sequences
-- Operational execution steps
+━━━ ABSOLUTE PROHIBITION ━━━
+NEVER write an option that says any of these:
+  ✗ "Wait for expert / technician / specialist"
+  ✗ "Consult the technical team"
+  ✗ "Await further investigation"
+  ✗ "Continue diagnosis"
+  ✗ "Escalate and wait"
+  ✗ Any option whose entire substance is deferring to a person or process
 
-You provide DECISION OPTIONS only — what to decide, not how to execute.
+These are NON-DECISIONS. Every option MUST describe a concrete operational
+outcome for the equipment (keep it down, restart it under conditions,
+reduce load, isolate the fault loop, switch to standby, etc.).
 
-FOCUS:
-- Make every option specific to the actual machine/asset in the incident_card
-  (e.g. refer to "CMP-01 air compressor" instead of generic "the equipment").
-- Use the hypotheses and facts to distinguish between HUMAN / TECHNICAL /
-  EXTERNAL causes, but do NOT output generic buckets like "Investigate human
-  error", "Inspect for technical failure", or "Check external factors" as
-  standalone option titles.
-- Each option must describe a concrete decision about HOW TO HANDLE the machine
-  (e.g. "Keep CMP-01 down and schedule expert inspection this shift",
-  "Restart CMP-01 under enhanced monitoring and vibration limits enforced").
+━━━ WHAT YOU DO ━━━
+Provide DECISION OPTIONS — what to decide and under what conditions,
+NOT how to execute (no step-by-step repair or disassembly instructions).
 
-SAFETY:
-- Do NOT recommend internal machine actions before isolating the trigger
-  condition. If only symptom-level hypotheses exist, warn that root cause is
-  not isolated and recommend further diagnosis before any restart or change of
-  operating conditions.
-- Always respect active safety_constraints and safety_blocks.
+Good option titles look like:
+  ✓ "Shut Down {ASSET} and Inspect Bearings This Shift"
+  ✓ "Restart {ASSET} at 60% Load Under Enhanced Vibration Monitoring"
+  ✓ "Isolate {ASSET} and Switch Production to Standby Unit"
+  ✓ "Restore {ASSET} with Forced Air Cooling and 2-Hour Observation Window"
 
-Return a JSON object:
+Bad option titles (FORBIDDEN):
+  ✗ "Escalate to Specialist"
+  ✗ "Await Technical Review"
+  ✗ "Continue Investigating"
+
+━━━ OPTION STRUCTURE ━━━
+Option 1 — Conservative (safest, lowest risk, possibly longer downtime)
+Option 2 — Moderate (balanced; USE THIS as "recommended": true)
+Option 3 — Aggressive (fastest restoration, higher operational risk)
+
+Each option's description must:
+- Name the asset explicitly (e.g. "CMP-01")
+- State the immediate action (shutdown / restart / reduce load / isolate / switch)
+- State the condition or monitoring requirement (e.g. "with vibration ≤ 3 mm/s")
+- State the operational outcome (production continues / halted / partial capacity)
+
+━━━ EVIDENCE USAGE ━━━
+- Use the Q&A HISTORY to ground your options in confirmed symptoms and conditions
+- Use KEY FACTS as hard constraints (e.g. if temperature was confirmed high, options must address cooling)
+- Use EQUIPMENT MANUAL EXCERPTS for operating limits, reset procedures guidance
+- Use SIMILAR PAST DECISIONS as precedent — prefer proven approaches when similarity ≥ 75%
+- Use TOP HYPOTHESES to set risk levels — high-confidence root causes allow more decisive options
+
+━━━ SAFETY RULES ━━━
+- If SAFETY BLOCKS (HARD STOPS) are present, mark any option that triggers them as
+  blocked_by_safety: true and recommended: false
+- Always include active safety_constraints in the relevant option's constraints field
+- If only symptom-level evidence exists (no confirmed root cause), the Conservative
+  option MUST be the recommended one
+
+Return a JSON object with no markdown fences:
 
 {
-  "analysis_summary": "Brief 2-3 sentence analysis summary of what was found, explicitly referencing the asset ID/name",
-  "root_cause_hypothesis": "Primary root cause hypothesis with confidence level",
+  "analysis_summary": "2-3 sentences naming the asset, confirmed findings from the Q&A, and the primary fault mode",
+  "root_cause_hypothesis": "Primary root cause with confidence level and supporting evidence from the Q&A",
   "options": [
     {
       "option_id": 1,
-      "title": "Short, machine-specific title (e.g. 'Keep CMP-01 Down for Expert Inspection')",
-      "description": "Decision-level description of how CMP-01 should be handled (shutdown, restarted with conditions, monitored, etc.)",
-      "risks": ["risk1", "risk2"],
-      "constraints": ["constraint1"],
-      "confidence": 0.0 to 1.0,
-      "recommended": true/false,
+      "title": "Concrete, asset-specific title",
+      "description": "What to do with the asset, under what conditions, with what outcome",
+      "risks": ["Specific risk tied to this asset and this option"],
+      "constraints": ["Specific safety or operational constraint"],
+      "confidence": 0.0,
+      "recommended": false,
       "risk_level": "low | medium | medium-high | high",
-      "eta": "Estimated time, e.g. '10-15 min'"
+      "eta": "Realistic time estimate e.g. '15-20 min'"
     }
   ],
-  "risk_summary": "Overall risk assessment summary, explicitly tied to this asset",
-  "escalation_guidance": "When/why to escalate if this decision does not resolve the issue",
-  "requires_escalation": true/false,
-  "decision_authority": "Role name from the COMPANY ESCALATION MATRIX (if provided)",
-  "escalation_path": "Next escalation level if this decision fails (role name from the COMPANY ESCALATION MATRIX, if provided)"
+  "risk_summary": "Overall risk if no action is taken, tied to this specific asset",
+  "escalation_guidance": "Specific trigger condition for escalation (e.g. 'escalate if vibration exceeds 5 mm/s after restart')",
+  "requires_escalation": false,
+  "decision_authority": "Role from COMPANY ESCALATION MATRIX or 'Shift Supervisor'",
+  "escalation_path": "Next role from COMPANY ESCALATION MATRIX if decision fails"
 }
-
-Rules:
-- You MUST provide exactly 3 decision options, covering different approaches (e.g. conservative, moderate, aggressive).
-- Exactly ONE option should have "recommended": true.
-- If escalation is already triggered, set requires_escalation to true.
-- Include safety constraints in each relevant option.
-- Risk descriptions should be specific and actionable and refer to this machine
-  (e.g. "further damage to CMP-01 drive motor if restarted without inspection").
-- decision_authority and escalation_path MUST use specific roles defined in
-  the COMPANY ESCALATION MATRIX, if provided. Do NOT invent generic titles.
-- analysis_summary: always fill this with a concise analysis of the situation.
-- root_cause_hypothesis: state the primary suspected root cause.
-- risk_level: low for safe options, medium for standard, medium-high for options
-  with notable risk, high for dangerous options.
-- NOT RECOMMENDED options MUST have risk_level medium-high or high and include
-  explicit risk explanation in risks[].
-- eta: provide realistic time estimate per option.
-- Return ONLY the JSON object, no markdown fences, no extra text.
 """
 
 
@@ -125,10 +138,12 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
     company_id = state.get("company_id")
     levels = get_escalation_levels(company_id=company_id)
 
+    asset_id = incident_card.get("asset_id", "unknown")
+
     context_parts = [
         "=== INCIDENT ===",
         f"Summary: {incident_card.get('normalized_summary', '')}",
-        f"Asset: {incident_card.get('asset_id', 'unknown')}",
+        f"Asset: {asset_id}",
         f"Severity: {incident_card.get('severity', 'unknown')}",
         f"Safety: {incident_card.get('safety_level', 'unknown')}",
         f"Risk Score: {risk_score:.1f}/10",
@@ -136,17 +151,27 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
         f"Escalation Triggered: {escalation_triggered}",
     ]
 
+    # ── Q&A history (most critical context for concrete decisions) ────
+    if qa_history:
+        context_parts.append(f"\n=== DIAGNOSTIC Q&A HISTORY ({len(qa_history)} exchanges) ===")
+        for i, qa in enumerate(qa_history, 1):
+            q = qa.get("question", "")
+            a = qa.get("answer", "")
+            context_parts.append(f"Q{i}: {q}")
+            context_parts.append(f"A{i}: {a}")
+
     if hypotheses:
         context_parts.append("\n=== TOP HYPOTHESES ===")
         for h in hypotheses[:3]:
             context_parts.append(
-                f"- {h.get('description', '')} ({h.get('probability', 0):.0%}, {h.get('category', '')})"
+                f"- {h.get('description', '')} ({h.get('probability', 0):.0%}, "
+                f"category={h.get('category', '')}, layer={h.get('root_cause_layer', '?')})"
             )
 
     if facts:
         context_parts.append(f"\n=== KEY FACTS ({len(facts)} total) ===")
-        for f in facts[-8:]:
-            context_parts.append(f"- {f.get('key', '?')}: {f.get('value', '?')}")
+        for f in facts[-10:]:
+            context_parts.append(format_fact_line(f))
 
     if safety_constraints:
         context_parts.append("\n=== SAFETY CONSTRAINTS ===")
@@ -158,6 +183,26 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
         for b in safety_blocks:
             context_parts.append(f"- ⛔ {b}")
 
+    # ── Equipment manual context from Qdrant ──────────────────────────
+    try:
+        from src.services.manual_service import retrieve_manual_chunks
+        manual_query = incident_card.get("normalized_summary", "") or asset_id
+        manual_chunks = retrieve_manual_chunks(
+            equipment_id=asset_id,
+            query_text=manual_query,
+            company_id=int(company_id) if company_id else 0,
+            limit=4,
+        )
+        if manual_chunks:
+            context_parts.append("\n=== EQUIPMENT MANUAL EXCERPTS ===")
+            for chunk in manual_chunks:
+                text = (chunk.get("text") or "").strip()
+                score = chunk.get("score", 0)
+                if text:
+                    context_parts.append(f"[relevance {score:.0%}] {text[:600]}")
+    except Exception as e:
+        logger.debug("Manual context unavailable for brief: %s", e)
+
     pat_block = format_retrieved_patterns_for_llm(
         retrieved_patterns,
         max_patterns=DECISION_BRIEF_PATTERN_PROMPT_CAP,
@@ -168,58 +213,81 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
 
     if levels:
         context_parts.append("\n=== COMPANY ESCALATION MATRIX ===")
-        # levels is a dict[int, dict] from get_escalation_levels
         for level_num, info in sorted(levels.items()):
             context_parts.append(
                 f"- Level {level_num}: {info.get('name', '')}"
             )
 
-    # Warn if only symptom-level hypotheses
+    # ── Symptom-only warning — conservative option must be recommended ─
     symptom_only = all(h.get("root_cause_layer") == "symptom" for h in hypotheses) if hypotheses else False
     if symptom_only:
-        context_parts.append("\n=== ⚠️ WARNING ===")
-        context_parts.append("All hypotheses are at SYMPTOM level. Root cause is NOT isolated.")
-        context_parts.append("Recommend further diagnosis before action. Do NOT recommend internal machine actions.")
+        context_parts.append("\n=== ⚠️ NOTE ===")
+        context_parts.append(
+            "All hypotheses are symptom-level only — root cause not isolated. "
+            "Conservative option MUST be recommended. Options must still be concrete "
+            "operational decisions, NOT 'continue diagnosis' or 'wait for expert'."
+        )
 
     context = "\n".join(context_parts)
 
     lang_instruction = get_language_instruction(state.get("language"))
     llm = get_llm_for_brief(model="gpt-4", temperature=0.2)
+
+    def _strip_fences(text: str) -> str:
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[: text.rfind("```")]
+        return text.strip()
+
     response = llm.invoke([
         SystemMessage(content=SYSTEM_PROMPT + lang_instruction),
         HumanMessage(content=context),
     ])
-
-    raw = response.content.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1]
-        if raw.endswith("```"):
-            raw = raw[: raw.rfind("```")]
-        raw = raw.strip()
+    raw = _strip_fences(response.content)
 
     try:
         result = json.loads(raw)
     except json.JSONDecodeError:
-        result = {
-            "analysis_summary": "Unable to generate detailed analysis. Manual assessment required.",
-            "root_cause_hypothesis": "Unknown — further diagnosis needed",
-            "options": [
-                {
-                    "option_id": 1,
-                    "title": "Escalate to specialist",
-                    "description": "Refer incident to a subject-matter expert for detailed assessment",
-                    "risks": ["Delay in resolution"],
-                    "constraints": safety_constraints,
-                    "confidence": 0.5,
-                    "recommended": True,
-                    "risk_level": "medium",
-                    "eta": "Depends on expert availability",
-                }
-            ],
-            "risk_summary": "Unable to generate detailed brief. Manual assessment required.",
-            "escalation_guidance": "Escalate if no progress within 1 hour.",
-            "requires_escalation": True,
-        }
+        # First attempt produced invalid JSON — retry with an explicit repair prompt
+        logger.warning("Decision brief: first LLM response was not valid JSON, retrying.")
+        repair_prompt = (
+            "Your previous response was not valid JSON. "
+            "Return ONLY a raw JSON object — no markdown, no code fences, no extra text. "
+            "The JSON must follow this exact schema:\n"
+            "{\n"
+            '  "analysis_summary": "...",\n'
+            '  "root_cause_hypothesis": "...",\n'
+            '  "options": [\n'
+            '    {"option_id":1,"title":"...","description":"...","risks":["..."],'
+            '"constraints":[],"confidence":0.8,"recommended":true,"risk_level":"low","eta":"..."},\n'
+            '    {"option_id":2,"title":"...","description":"...","risks":["..."],'
+            '"constraints":[],"confidence":0.7,"recommended":false,"risk_level":"medium","eta":"..."},\n'
+            '    {"option_id":3,"title":"...","description":"...","risks":["..."],'
+            '"constraints":[],"confidence":0.6,"recommended":false,"risk_level":"medium-high","eta":"..."}\n'
+            "  ],\n"
+            '  "risk_summary": "...",\n'
+            '  "escalation_guidance": "...",\n'
+            '  "requires_escalation": false,\n'
+            '  "decision_authority": "...",\n'
+            '  "escalation_path": "..."\n'
+            "}\n\n"
+            f"Use the incident context already provided. Asset: {asset_id}. "
+            "All options must be concrete operational decisions for this asset — "
+            "NO 'wait for expert', NO 'continue diagnosis'."
+        )
+        retry_response = llm.invoke([
+            SystemMessage(content=SYSTEM_PROMPT + lang_instruction),
+            HumanMessage(content=context),
+            HumanMessage(content=repair_prompt),
+        ])
+        raw2 = _strip_fences(retry_response.content)
+        try:
+            result = json.loads(raw2)
+        except json.JSONDecodeError:
+            logger.error("Decision brief: retry also failed to produce valid JSON. Raw: %s", raw2[:500])
+            raise RuntimeError("Decision brief LLM returned invalid JSON on both attempts.")
 
     # ── Boundary: programmatic sanitization (no execution instructions) ──
     result, _ = sanitize_decision_brief(result, safety_constraints, safety_blocks)
@@ -279,31 +347,47 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
 
         # Pad to 3 with safe, decision-level placeholders if too few.
         # (No procedures; just "what to decide".)
+        _a = asset_id if asset_id and asset_id != "unknown" else "the asset"
         pad_templates = [
             {
-                "title": "Hold the asset in a safe state pending review",
-                "description": "Keep the asset offline / in a safe state until decision authority reviews the findings and confirms next steps.",
-                "risks": ["Extended downtime while awaiting decision authority review"],
+                "title": f"Keep {_a} Offline and Perform Targeted Inspection",
+                "description": (
+                    f"Shut down {_a} and perform a targeted inspection focused on "
+                    "the confirmed fault symptoms. Clear the fault condition before "
+                    "any restart attempt. Production impact must be managed separately."
+                ),
+                "risks": [f"Extended downtime for {_a} until inspection is complete"],
                 "constraints": [],
                 "confidence": 0.5,
                 "recommended": False,
                 "risk_level": "low",
-                "eta": "Until review is completed",
+                "eta": "30–90 min",
             },
             {
-                "title": "Continue diagnosis before committing to action",
-                "description": "Defer operational changes and gather additional evidence to isolate the root cause before any restart or load change decision.",
-                "risks": ["Delayed restoration if the issue is benign"],
+                "title": f"Restart {_a} at Reduced Load with Enhanced Monitoring",
+                "description": (
+                    f"Restart {_a} at 50–70% of rated load. Monitor critical parameters "
+                    "(vibration, temperature, pressure) every 15 minutes for the first hour. "
+                    "Return to full load only after one stable hour with no abnormal readings."
+                ),
+                "risks": [
+                    f"Fault may recur on {_a} if root cause is not fully resolved",
+                    "Risk of secondary damage if parameters exceed safe limits during monitored restart",
+                ],
                 "constraints": [],
-                "confidence": 0.5,
+                "confidence": 0.45,
                 "recommended": False,
-                "risk_level": "medium",
-                "eta": "30–60 min",
+                "risk_level": "medium-high",
+                "eta": "10–20 min to restart, 60 min monitoring",
             },
             {
-                "title": "Transfer operations to an alternative asset / fallback plan",
-                "description": "Route demand to an alternative asset or fallback plan while keeping the affected asset out of service until cleared.",
-                "risks": ["Capacity constraints or secondary impacts on other assets"],
+                "title": f"Isolate {_a} and Route Load to Standby Unit",
+                "description": (
+                    f"Take {_a} fully out of service and redirect its production load "
+                    "to the standby or backup unit. This preserves production continuity "
+                    f"while {_a} undergoes a complete fault investigation at a safe pace."
+                ),
+                "risks": ["Standby unit may have lower rated capacity", "Switchover may temporarily reduce throughput"],
                 "constraints": [],
                 "confidence": 0.5,
                 "recommended": False,
@@ -329,14 +413,18 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
         return ordered
 
     if not validated_options:
+        _a = asset_id if asset_id and asset_id != "unknown" else "the asset"
         validated_options.append(DecisionOption(
             option_id=1,
-            title="Manual assessment required",
-            description="Insufficient data for automated decision options",
-            risks=["Potential delay"],
+            title=f"Keep {_a} in Safe Offline State",
+            description=(
+                f"Maintain {_a} offline. Perform a physical walkdown of the reported fault "
+                "condition and verify all safety interlocks before any restart attempt."
+            ),
+            risks=[f"Downtime on {_a} until fault condition is physically cleared"],
             recommended=True,
-            risk_level="medium",
-            eta="N/A",
+            risk_level="low",
+            eta="Until fault cleared",
         ).model_dump())
 
     # Map decision authority and escalation label from DB escalation levels.
@@ -397,4 +485,7 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
         "current_node": "decision_brief",
         "diagnosis_end_time": diagnosis_end,
         "mttd_seconds": mttd,
+        # Clear pending diagnostic questions so reload/API does not repeat the
+        # last asked question alongside qa_history (brief path skips question_generation).
+        "questions": [],
     }

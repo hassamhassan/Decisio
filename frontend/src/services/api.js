@@ -262,9 +262,10 @@ export async function generateBrief(incidentId, language = 'en') {
     });
 }
 
-export async function submitOutcome(incidentId, outcome, selectedOptionId = null, language = 'en') {
+export async function submitOutcome(incidentId, outcome, selectedOptionId = null, language = 'en', outcomeNotes = null) {
     const body = { outcome, language };
     if (selectedOptionId != null) body.selected_option_id = selectedOptionId;
+    if (outcomeNotes && outcomeNotes.trim()) body.outcome_notes = outcomeNotes.trim();
     return apiFetch(`${API_BASE}/incidents/${incidentId}/outcome`, {
         method: 'POST',
         body: JSON.stringify(body),
@@ -411,4 +412,23 @@ export async function markNotificationRead(notificationId) {
 
 export async function markAllNotificationsRead() {
     return apiFetch(`${API_BASE}/admin/notifications/read-all`, { method: 'POST' });
+}
+
+// ── Admin Knowledge Base API ─────────────────────────────────────
+
+export async function listKnowledgeEntries() {
+    return apiFetch(`${API_BASE}/admin/knowledge`);
+}
+
+export async function createKnowledgeEntry(data) {
+    return apiFetch(`${API_BASE}/admin/knowledge`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function deleteKnowledgeEntry(entryId) {
+    return apiFetch(`${API_BASE}/admin/knowledge/${entryId}`, {
+        method: 'DELETE',
+    });
 }

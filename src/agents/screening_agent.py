@@ -150,19 +150,27 @@ def screening_agent(state: DecisioState) -> DecisioState:
     updated_card["status"] = "DIAGNOSIS_LOOP"
 
     risk_score = float(screening.get("initial_risk_score", 5.0))
-    gating_flags = screening.get("gating_flags", [])
+    raw_flags = screening.get("gating_flags") or []
+    gating_flags = [str(f).strip() for f in raw_flags if str(f).strip()]
+    updated_card["gating_flags"] = gating_flags
 
-    # Check for immediate escalation
+    # Immediate post-screening escalation: only hard safety crisis or quantified high risk.
+    # LLM "gating_flags" alone must NOT skip diagnosis — they are hints for the safety
+    # agent and Q&A. Low/normal risk incidents continue to the decision brief (3 options);
+    # escalation matrix / safety checks apply later in the loop.
+    HIGH_RISK_THRESHOLD = 8.0
     escalation_triggered = False
-    escalation_reasons = []
+    escalation_reasons: list[str] = []
     if updated_card.get("safety_level") == "danger":
         escalation_reasons.append("Safety level: DANGER")
-    if risk_score >= 8.0:
-        escalation_reasons.append(f"Risk score {risk_score} exceeds threshold")
-    if gating_flags:
-        escalation_reasons.extend(gating_flags)
-    if escalation_reasons:
         escalation_triggered = True
+        escalation_reasons.extend(gating_flags)
+    elif risk_score >= HIGH_RISK_THRESHOLD:
+        escalation_reasons.append(
+            f"Risk score {risk_score:.1f} >= high-risk threshold ({HIGH_RISK_THRESHOLD})"
+        )
+        escalation_triggered = True
+        escalation_reasons.extend(gating_flags)
 
     result_dict = {
         "incident_card": updated_card,

@@ -334,8 +334,9 @@ class DecisioState(TypedDict, total=False):
     # ── Outcome Capture (§5 steps 6-8) ───────────────────────────────
     outcome: str  # "success" | "failure" | "partial" | "pending"
     outcome_notes: str  # User's description of what happened
+    user_solution_notes: str  # Operator-typed solution text — highest-priority input for Decision Memory
     failed_attempts: int  # Count of failed resolution attempts
-    resolution_summary: str  # Final resolution description
+    resolution_summary: str  # Final resolution description (LLM-generated; may be overwritten)
     memory_written: bool  # Whether verified pattern was stored
     verification_confirmed: bool  # Whether trigger normalization was verified
     verification_notes: str  # Notes recorded during verification

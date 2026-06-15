@@ -19,7 +19,7 @@ import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.llm import get_llm
+from src.llm import get_llm_fast
 from src.state.state import (
     CONFIDENCE_THRESHOLD,
     MAX_TOTAL_QUESTIONS,
@@ -28,6 +28,7 @@ from src.state.state import (
 )
 from src.data.assets import get_asset, get_asset_type
 from src.data.safety_rules import get_all_applicable_rules
+from src.agents.prompt_context import format_fact_line
 
 import logging
 logger = logging.getLogger(__name__)
@@ -135,7 +136,7 @@ def safety_constraint_agent(state: DecisioState) -> DecisioState:
     if facts:
         context_parts.append("\n=== FACTS ===")
         for f in facts[-10:]:
-            context_parts.append(f"- {f.get('key', '?')}: {f.get('value', '?')}")
+            context_parts.append(format_fact_line(f))
 
     if hypotheses:
         context_parts.append("\n=== HYPOTHESES ===")
@@ -161,7 +162,7 @@ def safety_constraint_agent(state: DecisioState) -> DecisioState:
 
     context = "\n".join(context_parts)
 
-    llm = get_llm(temperature=0.1)
+    llm = get_llm_fast(temperature=0.1)
     response = llm.invoke([
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=context),

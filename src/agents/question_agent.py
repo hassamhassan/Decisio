@@ -27,10 +27,12 @@ an on-site operator knows exactly what to check and where.
 from __future__ import annotations
 
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.llm import get_llm
+from src.llm import get_llm_fast
 from src.data.assets import get_asset, get_upstream_downstream
 from src.data.safety_rules import get_safety_rules
 from src.state.state import (
@@ -39,7 +41,7 @@ from src.state.state import (
     DecisioState,
     Question,
 )
-from src.agents.prompt_context import format_qa_history_for_llm, get_language_instruction
+from src.agents.prompt_context import format_fact_line, format_qa_history_for_llm, get_language_instruction
 
 # Recent Q&A only in prompts; full qa_history stays in state for DB / dedup.
 QUESTION_AGENT_QA_PROMPT_WINDOW = 8
@@ -47,11 +49,16 @@ QUESTION_AGENT_QA_PROMPT_WINDOW = 8
 
 # ── Deduplication ─────────────────────────────────────────────────────
 
+def _norm_question_text(text: str) -> str:
+    """Lowercase and collapse whitespace for stable comparison."""
+    return " ".join((text or "").lower().split())
+
+
 def _is_duplicate(new_q: str, history: list[dict], threshold: float = 0.65) -> bool:
     """Return True if new_q is too similar to a question already in history."""
-    new_words = set(new_q.lower().split())
+    new_words = set(_norm_question_text(new_q).split())
     for qa in history:
-        old_words = set(qa.get("question", "").lower().split())
+        old_words = set(_norm_question_text(qa.get("question", "")).split())
         if not new_words or not old_words:
             continue
         overlap = len(new_words & old_words) / max(len(new_words | old_words), 1)
@@ -261,96 +268,130 @@ def question_agent(state: DecisioState) -> DecisioState:
     step_category = DIAGNOSTIC_CATEGORIES[step_index]
     step_label = DIAGNOSTIC_CATEGORY_LABELS[step_category]
 
-    # ── Equipment / safety enrichment ────────────────────────────────
+    # ── Equipment / safety enrichment (manual chunks fetch in parallel) ─
     company_id = state.get("company_id")
     incident_asset = (machine_name or incident_card.get("asset_id") or "").strip()
-    asset_info = get_asset(incident_asset, company_id=company_id) if incident_asset else None
-    upstream_downstream = (
-        get_upstream_downstream(incident_asset, company_id=company_id)
-        if incident_asset
-        else {}
+
+    try:
+        manual_limit = int(os.getenv("DECISIO_QUESTION_MANUAL_LIMIT", "3"))
+    except ValueError:
+        manual_limit = 3
+    manual_limit = max(0, min(manual_limit, 8))
+
+    query_for_manual = (
+        reported_symptoms
+        or problem_description
+        or (incident_card.get("normalized_summary") or "")
     )
-    equipment_type = asset_info["type"] if asset_info else None
-    safety_rules = (
-        get_safety_rules(equipment_type, company_id=company_id)
-        if equipment_type
-        else []
-    )
 
-    # ── Build full context block for the LLM ─────────────────────────
-    context_parts = [
-        "=== INCIDENT OVERVIEW ===",
-        f"Machine / Asset ID: {incident_asset or 'not specified'}",
-        f"Symptoms reported by operator: {reported_symptoms or problem_description or incident_card.get('normalized_summary', 'N/A')}",
-        f"Severity: {incident_card.get('severity', 'unknown')}",
-        f"Safety Level: {incident_card.get('safety_level', 'unknown')}",
-        f"Impact: {incident_card.get('impact', 'not assessed')}",
-        f"Scope: {incident_card.get('scope', 'unknown')}",
-        f"Extracted symptom keywords: {', '.join(incident_card.get('symptoms') or []) or 'none yet'}",
-    ]
-
-    if asset_info:
-        context_parts += [
-            "",
-            "=== EQUIPMENT DETAILS ===",
-            f"Name: {asset_info.get('name', 'N/A')}",
-            f"Type: {asset_info.get('type', 'N/A')}",
-            f"Criticality: {asset_info.get('criticality', 'N/A')}",
-            f"Process Line: {asset_info.get('process_line', 'N/A')}",
-        ]
-        if upstream_downstream.get("upstream"):
-            up = upstream_downstream["upstream"]
-            context_parts.append(
-                f"Upstream: {upstream_downstream.get('upstream_id', '?')} — "
-                f"{up.get('name', '?')} ({up.get('type', '?')})"
-            )
-        if upstream_downstream.get("downstream"):
-            dn = upstream_downstream["downstream"]
-            context_parts.append(
-                f"Downstream: {upstream_downstream.get('downstream_id', '?')} — "
-                f"{dn.get('name', '?')} ({dn.get('type', '?')})"
-            )
-
-    if safety_rules:
-        context_parts += ["", "=== APPLICABLE SAFETY RULES ==="]
-        for rule in safety_rules[:5]:
-            context_parts.append(f"- {rule}")
-
-    context_parts += [
-        "",
-        "=== PROCESS FAILURE ASSESSMENT ===",
-        f"Process failure suspected: {'YES — include a process / procedure question' if process_failure_suspected else 'No'}",
-    ]
-    if process_failure_indicators:
-        context_parts.append(f"Indicators: {', '.join(process_failure_indicators)}")
-
-    # ── Manual context from Qdrant manuals collection ─────────────────
-    if incident_asset and company_id is not None:
+    def _load_manual() -> list:
+        if manual_limit <= 0 or not incident_asset or company_id is None:
+            return []
         try:
             from src.services.manual_service import retrieve_manual_chunks
-            query = reported_symptoms or problem_description or incident_card.get("normalized_summary", "")
-            manual_chunks = retrieve_manual_chunks(
+            return retrieve_manual_chunks(
                 equipment_id=incident_asset,
-                query_text=query,
+                query_text=query_for_manual or incident_asset,
                 company_id=int(company_id),
-                limit=5,
+                limit=manual_limit,
             )
-            if manual_chunks:
-                context_parts += ["", "=== EQUIPMENT MANUAL CONTEXT (use this for precise component names & procedures) ==="]
-                for chunk in manual_chunks:
-                    context_parts.append(f"[From manual, relevance {chunk['score']:.0%}]")
-                    context_parts.append(chunk["text"])
-        except Exception as _manual_err:
-            import logging as _log
-            _log.getLogger(__name__).debug("Manual retrieval skipped: %s", _manual_err)
+        except Exception:
+            return []
 
-    context_parts += [
-        "",
-        f"=== CURRENT DIAGNOSTIC STEP ===",
-        f"Step {current_step}/10: {step_label}",
-        f"Category key: {step_category}",
-        f"You MUST generate a question specifically for this step.",
-    ]
+    manual_pool: ThreadPoolExecutor | None = None
+    manual_fut = None
+    if manual_limit > 0 and incident_asset and company_id is not None:
+        manual_pool = ThreadPoolExecutor(max_workers=1)
+        manual_fut = manual_pool.submit(_load_manual)
+
+    try:
+        asset_info = get_asset(incident_asset, company_id=company_id) if incident_asset else None
+        upstream_downstream = (
+            get_upstream_downstream(incident_asset, company_id=company_id)
+            if incident_asset
+            else {}
+        )
+        equipment_type = asset_info["type"] if asset_info else None
+        safety_rules = (
+            get_safety_rules(equipment_type, company_id=company_id)
+            if equipment_type
+            else []
+        )
+
+        # ── Build full context block for the LLM ─────────────────────────
+        context_parts = [
+            "=== INCIDENT OVERVIEW ===",
+            f"Machine / Asset ID: {incident_asset or 'not specified'}",
+            f"Symptoms reported by operator: {reported_symptoms or problem_description or incident_card.get('normalized_summary', 'N/A')}",
+            f"Severity: {incident_card.get('severity', 'unknown')}",
+            f"Safety Level: {incident_card.get('safety_level', 'unknown')}",
+            f"Impact: {incident_card.get('impact', 'not assessed')}",
+            f"Scope: {incident_card.get('scope', 'unknown')}",
+            f"Extracted symptom keywords: {', '.join(incident_card.get('symptoms') or []) or 'none yet'}",
+        ]
+
+        if asset_info:
+            context_parts += [
+                "",
+                "=== EQUIPMENT DETAILS ===",
+                f"Name: {asset_info.get('name', 'N/A')}",
+                f"Type: {asset_info.get('type', 'N/A')}",
+                f"Criticality: {asset_info.get('criticality', 'N/A')}",
+                f"Process Line: {asset_info.get('process_line', 'N/A')}",
+            ]
+            if upstream_downstream.get("upstream"):
+                up = upstream_downstream["upstream"]
+                context_parts.append(
+                    f"Upstream: {upstream_downstream.get('upstream_id', '?')} — "
+                    f"{up.get('name', '?')} ({up.get('type', '?')})"
+                )
+            if upstream_downstream.get("downstream"):
+                dn = upstream_downstream["downstream"]
+                context_parts.append(
+                    f"Downstream: {upstream_downstream.get('downstream_id', '?')} — "
+                    f"{dn.get('name', '?')} ({dn.get('type', '?')})"
+                )
+
+        if safety_rules:
+            context_parts += ["", "=== APPLICABLE SAFETY RULES ==="]
+            for rule in safety_rules[:5]:
+                context_parts.append(f"- {rule}")
+
+        context_parts += [
+            "",
+            "=== PROCESS FAILURE ASSESSMENT ===",
+            f"Process failure suspected: {'YES — include a process / procedure question' if process_failure_suspected else 'No'}",
+        ]
+        if process_failure_indicators:
+            context_parts.append(f"Indicators: {', '.join(process_failure_indicators)}")
+
+        manual_chunks: list = []
+        if manual_fut is not None:
+            try:
+                timeout = float(os.getenv("DECISIO_MANUAL_FETCH_TIMEOUT", "2"))
+            except ValueError:
+                timeout = 5.0
+            try:
+                manual_chunks = manual_fut.result(timeout=timeout) or []
+            except Exception:
+                manual_chunks = []
+
+        if manual_chunks:
+            context_parts += ["", "=== EQUIPMENT MANUAL CONTEXT (use this for precise component names & procedures) ==="]
+            for chunk in manual_chunks:
+                context_parts.append(f"[From manual, relevance {chunk['score']:.0%}]")
+                context_parts.append(chunk["text"])
+
+        context_parts += [
+            "",
+            f"=== CURRENT DIAGNOSTIC STEP ===",
+            f"Step {current_step}/10: {step_label}",
+            f"Category key: {step_category}",
+            f"You MUST generate a question specifically for this step.",
+        ]
+    finally:
+        if manual_pool is not None:
+            manual_pool.shutdown(wait=False, cancel_futures=True)
 
     qa_block = format_qa_history_for_llm(
         qa_history,
@@ -365,10 +406,7 @@ def question_agent(state: DecisioState) -> DecisioState:
     if facts:
         context_parts.append("\n=== CONFIRMED FACTS (incorporate into your question) ===")
         for f in facts:
-            context_parts.append(
-                f"- {f.get('key', '?')}: {f.get('value', '?')} "
-                f"(confidence: {f.get('confidence', 0):.0%})"
-            )
+            context_parts.append(format_fact_line(f, confidence=True))
 
     if hypotheses:
         context_parts.append("\n=== ACTIVE HYPOTHESES (ask to confirm or rule out) ===")
@@ -388,7 +426,7 @@ def question_agent(state: DecisioState) -> DecisioState:
     context = "\n".join(context_parts)
 
     # Temperature 0.4 — gives richer, more natural language while staying focused
-    llm = get_llm(temperature=0.4)
+    llm = get_llm_fast(temperature=0.4)
 
     step_instruction = (
         f"Generate a single detailed diagnostic question for "
@@ -456,7 +494,10 @@ def question_agent(state: DecisioState) -> DecisioState:
 
     return {
         "questions": validated_questions,
-        "current_diagnostic_step": current_step,
+        # NOTE: do NOT return current_diagnostic_step here.
+        # advance_diagnostic_step (which runs before this node) already
+        # incremented the step.  Re-emitting the value we read at the start of
+        # this call would overwrite the increment and keep the step frozen at 1.
         "questions_asked_count": prev_count + len(validated_questions),
         "diagnostic_steps_completed": steps_completed,
         "status": "DIAGNOSIS_LOOP",

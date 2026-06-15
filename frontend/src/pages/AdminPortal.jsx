@@ -10,6 +10,7 @@ import {
     createEscalationRule, updateEscalationRule, deleteEscalationRule,
     changePassword, getKpiStats, getEscalationSessions,
     getAdminNotifications, markNotificationRead, markAllNotificationsRead,
+    listKnowledgeEntries, createKnowledgeEntry, deleteKnowledgeEntry,
 } from '../services/api'
 import EscalationChat from '../components/EscalationChat'
 import LanguageToggle from '../components/LanguageToggle'
@@ -25,6 +26,7 @@ function getSections(t) {
         { id: 'escalation', label: t('adminPage.sidebar.sections.escalation'), icon: '📈' },
         { id: 'live', label: t('adminPage.sidebar.sections.live'), icon: '💬' },
         { id: 'reports', label: t('adminPage.sidebar.sections.reports'), icon: '📋' },
+        { id: 'knowledge', label: 'Knowledge Base', icon: '🧠' },
     ]
 }
 
@@ -316,6 +318,7 @@ export default function AdminPortal() {
                 {section === 'escalation' && <EscalationSection />}
                 {section === 'live' && <LiveEscalationsSection />}
                 {section === 'reports' && <ReportsSection />}
+                {section === 'knowledge' && <KnowledgeSection />}
             </main>
 
             {showPwModal && (
@@ -566,7 +569,7 @@ function UsersSection() {
                         {!editUser && <div className="form-group"><label>{t('adminPage.users.fields.username')}</label><input value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} required /></div>}
                         <div className="form-group"><label>{t('adminPage.users.fields.email')}</label><input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required={!editUser} /></div>
                         <div className="form-group"><label>{t('adminPage.users.fields.fullName')}</label><input value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} /></div>
-                        <div className="form-group"><label>Contact Number</label><input value={form.contact_number} onChange={e => setForm({ ...form, contact_number: e.target.value })} /></div>
+                        <div className="form-group"><label>Contact Number</label><input value={form.contact_number} onChange={e => { const v = e.target.value; if (/^[+\d]*$/.test(v)) setForm({ ...form, contact_number: v }) }} /></div>
                         <div className="form-group"><label>{t('adminPage.users.fields.password')} {editUser && `(${t('adminPage.users.fields.keepBlank')})`}</label><input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required={!editUser} /></div>
                         <div className="form-group"><label>{t('adminPage.users.fields.userType')}</label>
                             <select value={form.user_type} onChange={e => setForm({ ...form, user_type: e.target.value })}>
@@ -1555,6 +1558,260 @@ function LiveEscalationsSection() {
                         </tbody>
                     </table>
                 </div>
+            )}
+        </div>
+    )
+}
+
+// ── Knowledge Base Section ─────────────────────────────────────────
+
+function KnowledgeSection() {
+    const [entries, setEntries] = useState([])
+    const [equipmentList, setEquipmentList] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState('')
+    const [showForm, setShowForm] = useState(false)
+    const [form, setForm] = useState({ problem: '', solution: '', tags: '', equipment_id: '' })
+    const [formError, setFormError] = useState('')
+    const [saving, setSaving] = useState(false)
+    const [confirmDelete, setConfirmDelete] = useState(null)
+    const [expanded, setExpanded] = useState(null)
+
+    const load = () => {
+        setLoading(true)
+        setError('')
+        listKnowledgeEntries()
+            .then(data => setEntries(data.entries || []))
+            .catch(err => setError(err.message))
+            .finally(() => setLoading(false))
+    }
+
+    useEffect(() => {
+        load()
+        listEquipment()
+            .then(data => setEquipmentList(data.equipment || []))
+            .catch(() => {})
+    }, [])
+
+    const openForm = () => {
+        setForm({ problem: '', solution: '', tags: '', equipment_id: '' })
+        setFormError('')
+        setShowForm(true)
+    }
+
+    const handleSubmit = async (e) => {
+        e.preventDefault()
+        if (!form.problem.trim()) { setFormError('Problem is required.'); return }
+        if (!form.solution.trim()) { setFormError('Solution is required.'); return }
+        setSaving(true)
+        setFormError('')
+        try {
+            const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean)
+            await createKnowledgeEntry({
+                problem: form.problem.trim(),
+                solution: form.solution.trim(),
+                tags,
+                equipment_id: form.equipment_id || null,
+            })
+            setShowForm(false)
+            load()
+        } catch (err) {
+            setFormError(err.message)
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    const handleDelete = async () => {
+        if (!confirmDelete) return
+        try {
+            await deleteKnowledgeEntry(confirmDelete)
+            setConfirmDelete(null)
+            load()
+        } catch (err) {
+            setError(err.message)
+            setConfirmDelete(null)
+        }
+    }
+
+    return (
+        <div className="admin-section">
+            <div className="admin-header-row">
+                <h2 className="admin-title">🧠 Knowledge Base</h2>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="admin-btn" onClick={load}>↻ Refresh</button>
+                    <button className="admin-btn primary" onClick={openForm}>+ Add Entry</button>
+                </div>
+            </div>
+
+            {error && <div className="form-error" style={{ marginBottom: 16 }}>{error}</div>}
+
+            {loading ? (
+                <div className="admin-loading">Loading...</div>
+            ) : entries.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-dim)' }}>
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>🧠</div>
+                    <p>No knowledge entries yet. Add your first problem/solution pair.</p>
+                </div>
+            ) : (
+                <div className="admin-table-wrap">
+                    <table className="admin-table">
+                        <thead>
+                            <tr>
+                                <th>Machine</th>
+                                <th>Problem</th>
+                                <th>Solution</th>
+                                <th>Tags</th>
+                                <th>Vector DB</th>
+                                <th>Created</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {entries.map(entry => (
+                                <tr key={entry.id}>
+                                    <td style={{ whiteSpace: 'nowrap' }}>
+                                        {entry.equipment_name
+                                            ? <span style={{
+                                                display: 'inline-block', background: 'var(--bg-soft)',
+                                                border: '1px solid var(--border)', borderRadius: 4,
+                                                padding: '2px 8px', fontSize: 12,
+                                            }}>{entry.equipment_name}</span>
+                                            : <span style={{ color: 'var(--text-dim)' }}>—</span>}
+                                    </td>
+                                    <td style={{ maxWidth: 260 }}>
+                                        <div
+                                            style={{ cursor: 'pointer' }}
+                                            onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}
+                                        >
+                                            {expanded === entry.id
+                                                ? entry.problem
+                                                : entry.problem.length > 80
+                                                    ? entry.problem.slice(0, 80) + '…'
+                                                    : entry.problem}
+                                        </div>
+                                    </td>
+                                    <td style={{ maxWidth: 260 }}>
+                                        <div
+                                            style={{ cursor: 'pointer' }}
+                                            onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}
+                                        >
+                                            {expanded === entry.id
+                                                ? entry.solution
+                                                : entry.solution.length > 80
+                                                    ? entry.solution.slice(0, 80) + '…'
+                                                    : entry.solution}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        {(entry.tags || []).length > 0
+                                            ? entry.tags.map(tag => (
+                                                <span key={tag} style={{
+                                                    display: 'inline-block', background: 'var(--bg-soft)',
+                                                    border: '1px solid var(--border)', borderRadius: 4,
+                                                    padding: '1px 6px', fontSize: 11, marginRight: 4,
+                                                }}>{tag}</span>
+                                            ))
+                                            : '—'}
+                                    </td>
+                                    <td>
+                                        {entry.vector_id ? (
+                                            <span style={{
+                                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                                                background: '#d1fae5', color: '#065f46',
+                                                border: '1px solid #6ee7b7', borderRadius: 4,
+                                                padding: '2px 8px', fontSize: 12, fontWeight: 600,
+                                            }}>✓ Synced</span>
+                                        ) : (
+                                            <span style={{
+                                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                                                background: '#fee2e2', color: '#991b1b',
+                                                border: '1px solid #fca5a5', borderRadius: 4,
+                                                padding: '2px 8px', fontSize: 12, fontWeight: 600,
+                                            }}>✗ Not synced</span>
+                                        )}
+                                    </td>
+                                    <td style={{ whiteSpace: 'nowrap' }}>
+                                        {entry.created_at
+                                            ? new Date(entry.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                            : '—'}
+                                    </td>
+                                    <td>
+                                        <button
+                                            className="admin-btn-sm danger"
+                                            onClick={() => setConfirmDelete(entry.id)}
+                                        >Delete</button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            {showForm && (
+                <Modal title="Add Knowledge Entry" error={formError} onClose={() => setShowForm(false)}>
+                    <form onSubmit={handleSubmit}>
+                        <div className="form-group">
+                            <label>Machine <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>(optional)</span></label>
+                            <select
+                                value={form.equipment_id}
+                                onChange={e => setForm({ ...form, equipment_id: e.target.value })}
+                            >
+                                <option value="">— Select machine —</option>
+                                {equipmentList.map(eq => (
+                                    <option key={eq.id} value={eq.id}>{eq.name} ({eq.id})</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label>Problem *</label>
+                            <textarea
+                                rows={4}
+                                value={form.problem}
+                                onChange={e => setForm({ ...form, problem: e.target.value })}
+                                placeholder="Describe the problem or symptom..."
+                                style={{ width: '100%', resize: 'vertical' }}
+                                required
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Solution *</label>
+                            <textarea
+                                rows={4}
+                                value={form.solution}
+                                onChange={e => setForm({ ...form, solution: e.target.value })}
+                                placeholder="Describe the solution or resolution steps..."
+                                style={{ width: '100%', resize: 'vertical' }}
+                                required
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Tags <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>(comma-separated, optional)</span></label>
+                            <input
+                                value={form.tags}
+                                onChange={e => setForm({ ...form, tags: e.target.value })}
+                                placeholder="e.g. pump, pressure, mechanical"
+                            />
+                        </div>
+                        <div className="form-actions">
+                            <button type="button" className="admin-btn" onClick={() => setShowForm(false)}>Cancel</button>
+                            <button type="submit" className="admin-btn primary" disabled={saving}>
+                                {saving ? 'Saving…' : 'Add Entry'}
+                            </button>
+                        </div>
+                    </form>
+                </Modal>
+            )}
+
+            {confirmDelete && (
+                <Modal title="Delete Knowledge Entry" onClose={() => setConfirmDelete(null)}>
+                    <p style={{ marginBottom: 20 }}>Are you sure you want to delete this entry? It will be removed from both the database and the vector store.</p>
+                    <div className="form-actions">
+                        <button className="admin-btn" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                        <button className="admin-btn danger" onClick={handleDelete}>Delete</button>
+                    </div>
+                </Modal>
             )}
         </div>
     )

@@ -19,7 +19,7 @@ from src.llm import get_llm
 from src.state.state import DecisioState
 from src.data.assets import get_asset, get_upstream_downstream
 from src.data.escalation_matrix import get_escalation_levels, get_escalation_rules
-from src.agents.prompt_context import format_qa_history_for_llm
+from src.agents.prompt_context import fact_value_only, format_fact_line, format_qa_history_for_llm
 
 ESCALATION_QA_PROMPT_WINDOW = 12
 
@@ -179,6 +179,7 @@ def escalation_agent(state: DecisioState) -> DecisioState:
             },
             "status": "PENDING_ESCALATION_CONFIG",
             "current_node": "escalation",
+            "questions": [],
         }
 
     level = _determine_escalation_level(state)
@@ -199,6 +200,7 @@ def escalation_agent(state: DecisioState) -> DecisioState:
             },
             "status": "NO_ESCALATION",
             "current_node": "escalation",
+            "questions": [],
         }
 
     # Build context for LLM
@@ -264,8 +266,7 @@ def escalation_agent(state: DecisioState) -> DecisioState:
     if facts:
         context_parts.append(f"\n=== KNOWN FACTS ({len(facts)}) ===")
         for f in facts:
-            flag = " ⚠️ CONTRADICTION" if f.get("contradiction") else ""
-            context_parts.append(f"- {f.get('key', '?')}: {f.get('value', '?')}{flag}")
+            context_parts.append(format_fact_line(f, escalation=True))
 
     if hypotheses:
         context_parts.append("\n=== HYPOTHESES ===")
@@ -316,7 +317,7 @@ def escalation_agent(state: DecisioState) -> DecisioState:
             "escalation_summary": f"Escalation triggered: {'; '.join(escalation_reasons[:3])}",
             "recommended_expertise": "General technical specialist",
             "urgency": "within_1_hour",
-            "key_findings": [f.get("value", "") for f in facts[:5]],
+            "key_findings": [fact_value_only(f) for f in facts[:5]],
             "what_was_tried": [f"Attempt failed ({failed_attempts} total)"] if failed_attempts else [],
             "open_questions": [],
             "safety_warnings": safety_constraints[:3],
@@ -360,4 +361,5 @@ def escalation_agent(state: DecisioState) -> DecisioState:
         "escalation": escalation,
         "status": "ESCALATED",
         "current_node": "escalation",
+        "questions": [],
     }

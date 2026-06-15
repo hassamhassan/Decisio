@@ -5,6 +5,12 @@ import LanguageToggle from '../components/LanguageToggle'
 import { useI18n } from '../i18n'
 import { resolveTextDirection } from '../utils/textDirection'
 
+/** Collapse whitespace + lowercase so we can detect duplicate question text on reload. */
+function normalizeQuestionText(s) {
+    if (!s || typeof s !== 'string') return ''
+    return s.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
 export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin }) {
     const { lang, dir, t, toggleLang } = useI18n()
     const [messages, setMessages] = useState([])
@@ -19,6 +25,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
     const chatRef = useRef(null)
     const inputRef = useRef(null)
     const outcomeSelectedOptionIdRef = useRef(null)
+    const outcomeNotesRef = useRef(null)
     const canMarkSuccessFromChat = ['viewer', 'user', 'operator', 'engineer'].includes((user?.user_type || '').trim())
 
     const storedUser = getStoredUser()
@@ -96,10 +103,29 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                 }
                 msgs.push({ id: Math.random(), type: 'system', content: { type: 'brief', data: data.decision_brief, escalationTriggered: data.escalation_triggered } })
             }
+            const pendingDiagnostic =
+                !data.decision_brief &&
+                data.questions &&
+                data.questions.length > 0 &&
+                !['CLOSED', 'SUCCESS'].includes(data.status)
+            let showPendingDiagnostic = pendingDiagnostic
+            if (pendingDiagnostic) {
+                const pending = data.questions[0]?.question
+                const lastQa = data.qa_history?.length ? data.qa_history[data.qa_history.length - 1] : null
+                if (
+                    lastQa &&
+                    lastQa.answer &&
+                    pending &&
+                    normalizeQuestionText(lastQa.question) === normalizeQuestionText(pending)
+                ) {
+                    // Stale JSON: last Q&A already includes this text; do not show again on reopen.
+                    showPendingDiagnostic = false
+                }
+            }
             // Always show the pending clarification question (last LLM response) if present
             if (data.clarification_question) {
                 msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: [{ category: 'clarification', question: data.clarification_question }] } })
-            } else if (!data.decision_brief && data.questions && data.questions.length > 0 && !['CLOSED', 'SUCCESS'].includes(data.status)) {
+            } else if (showPendingDiagnostic) {
                 msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: data.questions, step: data.current_diagnostic_step } })
             }
             if (data.outcome && data.outcome !== 'pending') {
@@ -116,7 +142,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                 setChatMinimized(false)
                 setPhase('escalation_chat')
             } else if (data.decision_brief && data.outcome === 'pending') setPhase('outcome')
-            else if (data.clarification_question || (data.questions && data.questions.length > 0)) setPhase('diagnosing')
+            else if (data.clarification_question || showPendingDiagnostic) setPhase('diagnosing')
             else setPhase('idle')
         } catch (err) {
             showError(err, 'Load incident:')
@@ -290,8 +316,10 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
             try {
                 const selectedOpt = outcomeSelectedOptionIdRef.current
+                const outcomeNotes = outcomeNotesRef.current
                 outcomeSelectedOptionIdRef.current = null
-                const data = await submitOutcome(incident.incident_id, text, selectedOpt, lang)
+                outcomeNotesRef.current = null
+                const data = await submitOutcome(incident.incident_id, text, selectedOpt, lang, outcomeNotes)
                 setIncident(data)
 
                 addMessage('system', { type: 'outcome_result', data })
@@ -357,8 +385,9 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
         setInput('')
     }
 
-    const handleOutcomeButton = (outcome, selectedOptionId = null) => {
+    const handleOutcomeButton = (outcome, selectedOptionId = null, solutionNotes = null) => {
         outcomeSelectedOptionIdRef.current = selectedOptionId
+        outcomeNotesRef.current = solutionNotes
         handleSubmit(null, outcome)
     }
 
@@ -781,6 +810,8 @@ function StatusBar({ data, t }) {
 
 function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered, t }) {
     const [selectedOption, setSelectedOption] = useState(null)
+    const [showSolution, setShowSolution] = useState(false)
+    const [solutionText, setSolutionText] = useState('')
 
     useEffect(() => {
         if (!showOutcome || !data?.options?.length) {
@@ -836,27 +867,72 @@ function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered, t })
                 )}
 
                 {showOutcome && (
-                    <div className="outcome-actions">
-                        <button
-                            className="btn btn-success"
-                            onClick={() => {
-                                if (data.options?.length > 0 && selectedOption === null) {
-                                    return
-                                }
-                                const id =
-                                    selectedOption != null && data.options?.[selectedOption] != null
-                                        ? data.options[selectedOption].option_id
-                                        : null
-                                onOutcome('success', id)
-                            }}
-                            style={{ fontSize: '13px', padding: '8px 16px' }}
-                        >
-                            {t('userPage.decisionBrief.success')}
-                        </button>
-                        <button className="btn btn-danger" onClick={() => onOutcome('failure', null)} style={{ fontSize: '13px', padding: '8px 16px' }}>
-                            {t('userPage.decisionBrief.failure')}
-                        </button>
-                    </div>
+                    <>
+                        <div className="outcome-actions">
+                            <button
+                                className="btn btn-success"
+                                onClick={() => {
+                                    const id = selectedOption != null && data.options?.[selectedOption] != null
+                                        ? data.options[selectedOption].option_id : null
+                                    onOutcome('success', id)
+                                }}
+                                style={{ fontSize: '13px', padding: '8px 16px' }}
+                            >
+                                ✓ {t('userPage.decisionBrief.success')}
+                            </button>
+                            <button
+                                className="btn btn-danger"
+                                onClick={() => onOutcome('failure', null)}
+                                style={{ fontSize: '13px', padding: '8px 16px' }}
+                            >
+                                ✗ {t('userPage.decisionBrief.failure')}
+                            </button>
+                            <button
+                                className="btn btn-outline"
+                                onClick={() => { setShowSolution(s => !s); setSolutionText('') }}
+                                style={{ fontSize: '13px', padding: '8px 16px' }}
+                            >
+                                💡 Solution
+                            </button>
+                        </div>
+
+                        {showSolution && (
+                            <div className="solution-input-area">
+                                <div className="solution-input-label">
+                                    Describe what actually resolved the problem — this will be saved to Decision Memory:
+                                </div>
+                                <textarea
+                                    className="solution-textarea"
+                                    rows={3}
+                                    placeholder="e.g. Replaced worn bearing on shaft A, cleaned intake filter, restarted at 80% load — all parameters normalised within 10 min."
+                                    value={solutionText}
+                                    onChange={e => setSolutionText(e.target.value)}
+                                    autoFocus
+                                />
+                                <div className="solution-actions">
+                                    <button
+                                        className="btn btn-success"
+                                        style={{ fontSize: '13px', padding: '7px 18px' }}
+                                        disabled={!solutionText.trim()}
+                                        onClick={() => {
+                                            const id = selectedOption != null && data.options?.[selectedOption] != null
+                                                ? data.options[selectedOption].option_id : null
+                                            onOutcome('success', id, solutionText.trim())
+                                        }}
+                                    >
+                                        ✓ OK — Save to Memory
+                                    </button>
+                                    <button
+                                        className="btn btn-outline"
+                                        style={{ fontSize: '13px', padding: '7px 14px' }}
+                                        onClick={() => { setShowSolution(false); setSolutionText('') }}
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </>

@@ -436,3 +436,33 @@ class AdminNotification(Base):
     read_at = Column(DateTime(timezone=True), nullable=True)
     payload = Column(JSONB, nullable=True)
 
+
+class KnowledgeEntry(Base):
+    """Admin-curated problem/solution pairs stored in both PostgreSQL and Qdrant.
+
+    Each entry is embedded and stored in the `decisio_knowledge` Qdrant collection
+    so it can be retrieved semantically during incident diagnosis.
+    `vector_id` holds the Qdrant point ID once the entry is synced.
+    """
+
+    __tablename__ = "knowledge_entries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id = Column(
+        Integer, ForeignKey("companies.id"), nullable=False, index=True,
+    )
+    equipment_id = Column(String(32), nullable=True, index=True)
+    equipment_name = Column(String(128), nullable=True)
+    problem = Column(Text, nullable=False)
+    solution = Column(Text, nullable=False)
+    tags = Column(JSONB, default=list)
+    vector_id = Column(String(64), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+

@@ -41,6 +41,17 @@ def get_llm(
     return _build_llm(model, temperature)
 
 
+def get_llm_fast(
+    temperature: float | None = None,
+) -> ChatOpenAI:
+    """Smaller, faster model for high-frequency Q&A (interpreter, hypothesis, safety, questions).
+
+    Override with env ``DECISIO_LLM_FAST`` (default ``gpt-4o-mini``).
+    """
+    fast = os.getenv("DECISIO_LLM_FAST", "gpt-4o-mini")
+    return _build_llm(model=fast, temperature=temperature)
+
+
 def get_llm_for_brief(
     model: str | None = None,
     temperature: float | None = None,

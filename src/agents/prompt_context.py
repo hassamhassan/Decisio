@@ -111,3 +111,33 @@ def format_retrieved_patterns_for_llm(
         lines.append(f"- {title} (similarity: {pct:.0%}) → {decision}")
 
     return "\n".join(lines)
+
+
+def format_fact_line(
+    f: object,
+    *,
+    escalation: bool = False,
+    confidence: bool | str = False,
+) -> str:
+    """Format one fact for LLM prompts. Tolerates legacy non-dict facts (e.g. bare strings)."""
+    if not isinstance(f, dict):
+        return f"- {f!s}"
+    line = f"- {f.get('key', '?')}: {f.get('value', '?')}"
+    if escalation and f.get("contradiction"):
+        line += " ⚠️ CONTRADICTION"
+    if confidence is True:
+        try:
+            c = float(f.get("confidence", 0) or 0)
+        except (TypeError, ValueError):
+            c = 0.0
+        line += f" (confidence: {c:.0%})"
+    elif confidence == "raw":
+        line += f" (confidence: {f.get('confidence', 0)})"
+    return line
+
+
+def fact_value_only(f: object) -> str:
+    """Extract display value from a fact for summaries / key_findings lists."""
+    if isinstance(f, dict):
+        return str(f.get("value", "") or "")
+    return str(f or "")

@@ -144,6 +144,10 @@ def _extract_text_txt(content: bytes) -> str:
 
 
 def _extract_text_pdf(content: bytes) -> str:
+    """Extract text from PDF, trying pypdf (plain then layout) then pdfminer.six."""
+    text = ""
+
+    # ── Attempt 1: pypdf plain mode ───────────────────────────────────
     try:
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(content))
@@ -153,9 +157,39 @@ def _extract_text_pdf(content: bytes) -> str:
                 pages.append(page.extract_text() or "")
             except Exception:
                 pass
-        return "\n".join(pages)
-    except Exception as e:
-        raise ValueError(f"PDF parsing failed: {e}")
+        text = "\n".join(pages).strip()
+    except Exception:
+        pass
+
+    # ── Attempt 2: pypdf layout mode ─────────────────────────────────
+    if not text:
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(content))
+            pages = []
+            for page in reader.pages:
+                try:
+                    pages.append(page.extract_text(extraction_mode="layout") or "")
+                except Exception:
+                    pass
+            text = "\n".join(pages).strip()
+        except Exception:
+            pass
+
+    # ── Attempt 3: pdfminer.six (handles complex encodings better) ───
+    if not text:
+        try:
+            from pdfminer.high_level import extract_text as pdfminer_extract
+            text = (pdfminer_extract(io.BytesIO(content)) or "").strip()
+        except Exception:
+            pass
+
+    if not text:
+        raise ValueError(
+            "File contains no extractable text. "
+            "The PDF may be a scanned image — please upload a text-based PDF, DOCX, or TXT file."
+        )
+    return text
 
 
 def _extract_text_docx(content: bytes) -> str:
@@ -223,10 +257,8 @@ def ingest_manual(
     """
     equipment_id = equipment_id.upper()
 
-    # 1. Extract text
+    # 1. Extract text (raises ValueError if no text found)
     text = extract_text(filename, content)
-    if not text.strip():
-        raise ValueError("File contains no extractable text.")
 
     # 2. Chunk
     chunks = chunk_text(text)
@@ -289,27 +321,25 @@ def ingest_manual(
 
 
 def delete_manual(company_id: int, equipment_id: str) -> None:
-    """Remove all manual chunks for a specific piece of equipment."""
+    """Remove all manual chunks for a specific piece of equipment from Qdrant."""
     equipment_id = equipment_id.upper()
     client = _get_qdrant()
     if client is None:
+        logger.warning("delete_manual: Qdrant client unavailable, skipping deletion for equipment=%s", equipment_id)
         return
-    try:
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
 
-        client.delete(
-            collection_name=MANUALS_COLLECTION,
-            points_selector=Filter(
-                must=[
-                    FieldCondition(key="company_id", match=MatchValue(value=int(company_id))),
-                    FieldCondition(key="equipment_id", match=MatchValue(value=equipment_id)),
-                ]
-            ),
-        )
-        logger.info("Manual deleted for equipment=%s company=%s", equipment_id, company_id)
-        retrieve_manual_chunks.cache_clear()
-    except Exception as e:
-        logger.warning("delete_manual failed: %s", e)
+    client.delete(
+        collection_name=MANUALS_COLLECTION,
+        points_selector=Filter(
+            must=[
+                FieldCondition(key="company_id", match=MatchValue(value=int(company_id))),
+                FieldCondition(key="equipment_id", match=MatchValue(value=equipment_id)),
+            ]
+        ),
+    )
+    logger.info("Manual deleted from Qdrant: equipment=%s company=%s", equipment_id, company_id)
+    retrieve_manual_chunks.cache_clear()
 
 
 def get_manual_chunk_count(company_id: int, equipment_id: str) -> int:

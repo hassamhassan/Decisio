@@ -11,7 +11,7 @@ import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.llm import get_llm
+from src.llm import get_llm_fast
 from src.state.state import DecisioState, Fact, QAPair
 
 SYSTEM_PROMPT = """\
@@ -91,7 +91,7 @@ def answer_interpreter_agent(state: DecisioState) -> DecisioState:
 
     context = "\n".join(context_parts)
 
-    llm = get_llm(temperature=0.1)
+    llm = get_llm_fast(temperature=0.1)
     response = llm.invoke([
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=context),
@@ -158,7 +158,8 @@ def answer_interpreter_agent(state: DecisioState) -> DecisioState:
     if "safety_concern" in signals:
         escalation_reasons.append(f"Safety concern detected at step {current_step}")
 
-    questions_asked = state.get("questions_asked_count", 0) + 1
+    # questions_asked_count is incremented only in question_agent when a new
+    # diagnostic question is issued — do not double-count here.
     step_cleared = parsed.get("step_cleared", True)
 
     # Dynamic Incident Card Updates
@@ -186,7 +187,6 @@ def answer_interpreter_agent(state: DecisioState) -> DecisioState:
         "facts": new_facts,
         "qa_history": updated_qa_history,
         "contradictions": new_contradictions,
-        "questions_asked_count": questions_asked,
         "escalation_triggered": escalation_triggered,
         "escalation_reasons": escalation_reasons,
         "current_node": "answer_interpreter",

@@ -50,6 +50,8 @@ def memory_write_agent(state: DecisioState) -> DecisioState:
     escalation_rule = ""
     delay_risk = ""
     for f in facts:
+        if not isinstance(f, dict):
+            continue
         if f.get("key") == "root_cause_confirmed":
             root_cause = f.get("value", "")
         if f.get("key") == "turning_point_signal":
@@ -65,6 +67,8 @@ def memory_write_agent(state: DecisioState) -> DecisioState:
     # What we capture: decision logic, NOT repair steps
     signals = []
     for f in facts:
+        if not isinstance(f, dict):
+            continue
         if f.get("key") not in ("root_cause_confirmed", "turning_point_signal",
                                  "why_symptoms_misleading", "escalation_rule", "delay_risk"):
             signals.append(f"{f.get('key', '?')}: {f.get('value', '?')}")
@@ -76,7 +80,14 @@ def memory_write_agent(state: DecisioState) -> DecisioState:
     asset = (incident_card.get("asset_id") or "").strip()
     problem_summary = f"{prob_line} (asset: {asset})" if asset else prob_line
 
-    if chosen:
+    # Priority order for decision_taken stored in memory:
+    # 1. Operator-typed solution (user_solution_notes) — most accurate, always use if present
+    # 2. Chosen option title + description — what was actually attempted
+    # 3. LLM-generated resolution_summary — fallback
+    user_solution = (state.get("user_solution_notes") or "").strip()
+    if user_solution:
+        solution_for_memory = user_solution
+    elif chosen:
         opt_title = (chosen.get("title") or "").strip()
         opt_desc = (chosen.get("description") or "").strip()
         solution_for_memory = f"{opt_title}: {opt_desc}".strip(": ").strip() if (opt_title or opt_desc) else resolution_summary

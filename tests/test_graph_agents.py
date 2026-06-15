@@ -12,7 +12,7 @@ def test_decision_brief_agent_three_options():
         },
         "symptoms": ["shaking"],
         "hypotheses": [{"description": "motor failure", "probability": 0.8, "category": "technical"}, {"description": "loose belt", "probability": 0.2, "category": "technical"}],
-        "facts": ["oil leak spotted"],
+        "facts": [{"key": "observation", "value": "oil leak spotted", "confidence": 0.7}],
         "safety_constraints": [],
         "safety_blocks": [],
         "qa_history": [],
@@ -33,20 +33,19 @@ def test_decision_brief_agent_three_options():
     assert len(brief["options"]) == 3, f"Expected 3 options, got {len(brief['options'])}"
 
 def test_decision_brief_agent_escalation_suppression():
-    # Deep Test: Verify normal options are suppressed when escalated
+    # When escalated, brief still carries exactly 3 options (UI contract) but flags escalation.
     test_state = {
         "incident_card": {"asset_id": "CMP-01"},
         "escalation_triggered": True,
         "escalation_reasons": ["Uncertain root cause"],
         "company_id": 1,
     }
-    
+
     brief_update = decision_brief_agent(test_state)
     brief = brief_update["decision_brief"]
-    
-    # Should only return one placeholder option
-    assert len(brief["options"]) == 1
-    assert "Escalation Required" in brief["options"][0]["description"]
+
+    assert brief.get("requires_escalation") is True
+    assert len(brief["options"]) == 3
 
 def test_escalation_agent_routing():
     # Deep Test: Ensure escalation agent maps rules correctly

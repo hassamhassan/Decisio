@@ -18,7 +18,7 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.llm import get_llm
-from src.agents.prompt_context import format_qa_history_for_llm
+from src.agents.prompt_context import format_fact_line, format_qa_history_for_llm
 
 EXPERT_CAPTURE_QA_PROMPT_WINDOW = 10
 from src.state.state import DecisioState
@@ -93,7 +93,7 @@ def expert_capture_agent(state: DecisioState) -> DecisioState:
     if facts:
         context_parts.append(f"\n=== KNOWN FACTS ({len(facts)}) ===")
         for f in facts[-10:]:
-            context_parts.append(f"- {f.get('key', '?')}: {f.get('value', '?')}")
+            context_parts.append(format_fact_line(f))
 
     qa_block = format_qa_history_for_llm(
         qa_history,

@@ -93,20 +93,26 @@ async def _upsert_incident_report(
     chosen = state.get("chosen_decision_option") or {}
     escalation = state.get("escalation") or {}
 
-    asset_id = (incident_card.get("asset_id") or "").strip() or None
+    asset_id_raw = (incident_card.get("asset_id") or "").strip() or None
+    asset_id_fk: str | None = None
     process_line = ""
-    if asset_id:
+    if asset_id_raw:
         eq_res = await session.execute(
             sa_select(Equipment).where(
                 Equipment.company_id == company_id,
-                Equipment.id == asset_id,
+                sa_func.upper(Equipment.id) == asset_id_raw.upper(),
             )
         )
         eq = eq_res.scalar_one_or_none()
-        process_line = (eq.process_line or "") if eq else ""
+        if eq:
+            asset_id_fk = eq.id
+            process_line = eq.process_line or ""
 
     normalized_summary = (incident_card.get("normalized_summary") or "").strip()
     title = normalized_summary or (state.get("report") or "Incident Report").strip()[:256]
+    # Equipment not in registry: FK must stay null; keep asset tag visible in title.
+    if asset_id_raw and asset_id_fk is None and asset_id_raw.upper() not in title.upper():
+        title = f"[{asset_id_raw}] {title}".strip()[:256]
     symptoms = incident_card.get("symptoms") or []
     if not symptoms:
         reported_symptoms = (state.get("reported_symptoms") or "").strip()
@@ -164,7 +170,7 @@ async def _upsert_incident_report(
         session.add(rec)
 
     rec.title = title[:256]
-    rec.asset_id = asset_id
+    rec.asset_id = asset_id_fk
     rec.process_line = process_line
     rec.symptoms = symptoms[:25]
     rec.trigger_condition = (state.get("reported_symptoms") or normalized_summary or "")[:2000]
@@ -249,6 +255,11 @@ class OutcomeRequest(BaseModel):
     selected_option_id: Optional[int] = Field(
         default=None,
         description="decision_brief.options[].option_id the operator ran before Success.",
+    )
+    outcome_notes: Optional[str] = Field(
+        default=None,
+        max_length=5_000,
+        description="User-provided solution description to store in Decision Memory.",
     )
     language: str = Field(default="en",max_length=5,description="UI language code (en or ar)")
 
@@ -810,12 +821,20 @@ async def submit_outcome(incident_id: str,req: OutcomeRequest,user: TokenData = 
         raise HTTPException(404,"Incident not found")
 
     outcome_text = sanitize_user_input(req.outcome.strip(),max_length=5_000)
+    user_solution = sanitize_user_input((req.outcome_notes or "").strip(), max_length=5_000)
     if outcome_text.lower() == "success":
-        outcome_notes = "Resolution successful — trigger conditions normalized."
+        outcome_notes = user_solution or "Resolution successful — trigger conditions normalized."
     elif outcome_text.lower() == "failure":
         outcome_notes = "Resolution failed — problem persists."
     else:
         outcome_notes = outcome_text
+
+    # Persist the operator's solution in a dedicated field so that
+    # outcome_capture_agent (which overwrites resolution_summary with its own
+    # LLM-generated text) cannot erase it.  memory_write_agent reads this field
+    # with the highest priority when building decision_taken for Qdrant.
+    if user_solution:
+        state["user_solution_notes"] = user_solution
 
     state["outcome_notes"] = outcome_notes
     state["status"] = "EXECUTING"
@@ -1063,11 +1082,11 @@ async def list_incidents_endpoint(user: TokenData = Depends(require_auth)):
 
 # ── Operational Data API endpoints ──────────────────────────────────
 
-from sqlalchemy import select as sa_select,update as sa_update,or_ as sa_or
+from sqlalchemy import select as sa_select,update as sa_update,or_ as sa_or,func as sa_func
 from sqlalchemy.exc import IntegrityError
 from src.db.models import (
     AdminNotification,Incident,Equipment,SafetyRule,EscalationLevel,EscalationRule,
-    IncidentReport,Company,EscalationSession,EscalationMessage,
+    IncidentReport,Company,EscalationSession,EscalationMessage,KnowledgeEntry,
 )
 
 
@@ -1557,19 +1576,28 @@ async def update_equipment(equipment_id: str,req: EquipmentUpdateRequest,admin: 
 
 @app.delete("/api/admin/equipment/{equipment_id}")
 async def delete_equipment(equipment_id: str,admin: TokenData = Depends(require_company_admin)):
-    """Delete equipment (admin only,scoped to admin's company)."""
+    """Delete equipment (admin only,scoped to admin's company). Also removes any associated manual from Qdrant."""
     async with get_session() as session:
         result = await session.execute(
             sa_select(Equipment)
-            .where(Equipment.id == equipment_id.upper())
+            .where(sa_func.upper(Equipment.id) == equipment_id.upper())
             .where(Equipment.company_id == admin.company_id)
         )
         eq = result.scalar_one_or_none()
         if not eq:
             raise HTTPException(404,"Equipment not found")
+        actual_id = eq.id
         await session.delete(eq)
         await session.flush()
-        return {"message": f"Equipment '{equipment_id.upper()}' deleted"}
+
+    # Clean up any manual chunks in Qdrant for this equipment
+    import asyncio
+    from src.services.manual_service import delete_manual
+    await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: delete_manual(company_id=admin.company_id, equipment_id=actual_id),
+    )
+    return {"message": f"Equipment '{actual_id}' deleted"}
 
 
 # ── Equipment Manual Upload (Qdrant) ──────────────────────────────────
@@ -1600,11 +1628,11 @@ async def upload_equipment_manual(
     if not content:
         raise HTTPException(400, "Empty file.")
 
-    # Verify equipment belongs to this company
+    # Verify equipment belongs to this company (case-insensitive ID match)
     async with get_session() as session:
         result = await session.execute(
             sa_select(Equipment)
-            .where(Equipment.id == equipment_id.upper())
+            .where(sa_func.upper(Equipment.id) == equipment_id.upper())
             .where(Equipment.company_id == admin.company_id)
         )
         eq = result.scalar_one_or_none()
@@ -1646,11 +1674,11 @@ async def delete_equipment_manual(
     admin: TokenData = Depends(require_company_admin),
 ):
     """Delete the uploaded manual for a piece of equipment from Qdrant."""
-    # Verify ownership
+    # Verify ownership (case-insensitive ID match)
     async with get_session() as session:
         result = await session.execute(
             sa_select(Equipment)
-            .where(Equipment.id == equipment_id.upper())
+            .where(sa_func.upper(Equipment.id) == equipment_id.upper())
             .where(Equipment.company_id == admin.company_id)
         )
         if not result.scalar_one_or_none():
@@ -1659,10 +1687,13 @@ async def delete_equipment_manual(
     import asyncio
     from src.services.manual_service import delete_manual
 
-    await asyncio.get_event_loop().run_in_executor(
-        None,
-        lambda: delete_manual(company_id=admin.company_id, equipment_id=equipment_id),
-    )
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: delete_manual(company_id=admin.company_id, equipment_id=equipment_id),
+        )
+    except Exception as e:
+        raise HTTPException(503, f"Failed to delete manual from vector store: {e}")
     return {"message": f"Manual for '{equipment_id.upper()}' deleted"}
 
 
@@ -1672,11 +1703,11 @@ async def get_equipment_manual_status(
     admin: TokenData = Depends(require_company_admin),
 ):
     """Return how many manual chunks are stored for a piece of equipment."""
-    # Verify ownership
+    # Verify ownership (case-insensitive ID match)
     async with get_session() as session:
         result = await session.execute(
             sa_select(Equipment)
-            .where(Equipment.id == equipment_id.upper())
+            .where(sa_func.upper(Equipment.id) == equipment_id.upper())
             .where(Equipment.company_id == admin.company_id)
         )
         if not result.scalar_one_or_none():
@@ -1775,6 +1806,134 @@ async def delete_safety_rule(rule_id: int,admin: TokenData = Depends(require_com
         await session.delete(rule)
         await session.flush()
         return {"message": f"Safety rule #{rule_id} deleted"}
+
+
+# ── Admin CRUD — Knowledge Base ────────────────────────────────────
+
+class KnowledgeEntryCreate(BaseModel):
+    problem: str
+    solution: str
+    tags: list = []
+    equipment_id: Optional[str] = None
+
+
+@app.get("/api/admin/knowledge")
+async def list_knowledge_entries(admin: TokenData = Depends(require_company_admin)):
+    """List all knowledge entries for this company."""
+    async with get_session() as session:
+        result = await session.execute(
+            sa_select(KnowledgeEntry)
+            .where(KnowledgeEntry.company_id == admin.company_id)
+            .order_by(KnowledgeEntry.created_at.desc())
+        )
+        rows = result.scalars().all()
+        return {
+            "entries": [
+                {
+                    "id": str(r.id),
+                    "equipment_id": r.equipment_id,
+                    "equipment_name": r.equipment_name,
+                    "problem": r.problem,
+                    "solution": r.solution,
+                    "tags": r.tags or [],
+                    "vector_id": r.vector_id,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ]
+        }
+
+
+@app.post("/api/admin/knowledge")
+async def create_knowledge_entry(req: KnowledgeEntryCreate, admin: TokenData = Depends(require_company_admin)):
+    """Create a knowledge entry, store it in DB and embed it in Qdrant."""
+    if not req.problem.strip():
+        raise HTTPException(400, "Problem text is required.")
+    if not req.solution.strip():
+        raise HTTPException(400, "Solution text is required.")
+
+    # Resolve equipment name from DB if equipment_id provided
+    equipment_id = req.equipment_id.strip().upper() if req.equipment_id else None
+    equipment_name = None
+    if equipment_id:
+        async with get_session() as session:
+            eq_result = await session.execute(
+                sa_select(Equipment).where(
+                    Equipment.id == equipment_id,
+                    Equipment.company_id == admin.company_id,
+                )
+            )
+            eq = eq_result.scalar_one_or_none()
+            if eq:
+                equipment_name = eq.name
+
+    entry_id = uuid.uuid4()
+
+    # Embed into Qdrant first (non-fatal if unavailable)
+    vector_id = None
+    try:
+        from src.services.knowledge_service import ingest_entry
+        vector_id = ingest_entry(
+            company_id=admin.company_id,
+            entry_id=str(entry_id),
+            problem=req.problem.strip(),
+            solution=req.solution.strip(),
+            equipment_name=equipment_name,
+        )
+    except Exception as e:
+        logger.warning("Knowledge entry Qdrant ingest failed (will save to DB only): %s", e)
+
+    async with get_session() as session:
+        entry = KnowledgeEntry(
+            id=entry_id,
+            company_id=admin.company_id,
+            equipment_id=equipment_id,
+            equipment_name=equipment_name,
+            problem=req.problem.strip(),
+            solution=req.solution.strip(),
+            tags=req.tags or [],
+            vector_id=vector_id,
+            created_by=admin.user_id,
+        )
+        session.add(entry)
+        await session.flush()
+
+    return {
+        "id": str(entry_id),
+        "equipment_id": equipment_id,
+        "equipment_name": equipment_name,
+        "problem": req.problem.strip(),
+        "solution": req.solution.strip(),
+        "tags": req.tags or [],
+        "vector_id": vector_id,
+    }
+
+
+@app.delete("/api/admin/knowledge/{entry_id}")
+async def delete_knowledge_entry(entry_id: str, admin: TokenData = Depends(require_company_admin)):
+    """Delete a knowledge entry from DB and Qdrant."""
+    async with get_session() as session:
+        result = await session.execute(
+            sa_select(KnowledgeEntry).where(
+                KnowledgeEntry.id == entry_id,
+                KnowledgeEntry.company_id == admin.company_id,
+            )
+        )
+        entry = result.scalar_one_or_none()
+        if not entry:
+            raise HTTPException(404, "Knowledge entry not found.")
+
+        # Remove from Qdrant
+        try:
+            from src.services.knowledge_service import delete_entry
+            delete_entry(company_id=admin.company_id, entry_id=entry_id)
+        except Exception as e:
+            logger.warning("Knowledge entry Qdrant delete failed: %s", e)
+
+        await session.delete(entry)
+        await session.flush()
+
+    return {"message": "Knowledge entry deleted."}
 
 
 # ── Admin CRUD — Escalation ────────────────────────────────────────

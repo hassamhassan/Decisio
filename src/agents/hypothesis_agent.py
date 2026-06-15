@@ -13,9 +13,10 @@ import os
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.llm import get_llm
+from src.llm import get_llm_fast
 from src.state.state import DecisioState, Hypothesis
 from src.agents.prompt_context import (
+    format_fact_line,
     format_qa_history_for_llm,
     format_retrieved_patterns_for_llm,
 )
@@ -92,11 +93,11 @@ def hypothesis_update_agent(state: DecisioState) -> DecisioState:
         state = {}
 
     # Latency control: hypothesis updates are expensive and usually don't need to run
-    # on every single turn. Default: run every 2 answers once hypotheses exist.
+    # on every single turn. Default: run every 3 answers once hypotheses exist.
     try:
-        every_n = int(os.getenv("DECISIO_HYPOTHESIS_EVERY_N", "2"))
+        every_n = int(os.getenv("DECISIO_HYPOTHESIS_EVERY_N", "3"))
     except Exception:
-        every_n = 2
+        every_n = 3
     every_n = max(1, every_n)
     questions_asked = int(state.get("questions_asked_count", 0) or 0)
     existing_hypotheses = state.get("hypotheses") or []
@@ -133,7 +134,7 @@ def hypothesis_update_agent(state: DecisioState) -> DecisioState:
         context_parts.append("\n=== KNOWN FACTS ===")
         # Cap to keep prompts small and fast.
         for f in facts[-14:]:
-            context_parts.append(f"- {f.get('key', '?')}: {f.get('value', '?')} (confidence: {f.get('confidence', 0)})")
+            context_parts.append(format_fact_line(f, confidence="raw"))
 
     qa_block = format_qa_history_for_llm(
         qa_history,
@@ -164,7 +165,7 @@ def hypothesis_update_agent(state: DecisioState) -> DecisioState:
 
     context = "\n".join(context_parts)
 
-    llm = get_llm(temperature=0.2)
+    llm = get_llm_fast(temperature=0.2)
     response = llm.invoke([
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=context),

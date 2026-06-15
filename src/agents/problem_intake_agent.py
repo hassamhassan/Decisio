@@ -117,13 +117,8 @@ def _clarification_history(qa_history: list[dict]) -> list:
     return msgs
 
 
-def _machine_list_text(company_id: int | None) -> str:
-    """Return a formatted machine list for the prompt."""
-    try:
-        equipment = fetch_all_equipment(company_id=company_id)
-    except Exception:
-        equipment = []
-
+def _machine_list_text_from_records(equipment: list) -> str:
+    """Format pre-fetched equipment rows for the machine-phase prompt (avoids a second DB round-trip)."""
     if not equipment:
         return "No machines are currently registered in the database."
 
@@ -225,39 +220,41 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
     company_id = state.get("company_id")
     ui_lang = state.get("language") or "en"
 
+    eq_list: list = []
     try:
-        from src.db.sync_queries import fetch_all_equipment
-        eq_list = fetch_all_equipment(company_id=company_id)
-        if not eq_list:
-            if not state.get("no_equipment_notified"):
-                try:
-                    from src.db.session import SessionLocal
-                    from src.db.crud import create_admin_notification
-                    with SessionLocal() as db:
-                        create_admin_notification(
-                            db,
-                            company_id=company_id,
-                            notification_type="SYSTEM_ALERT",
-                            incident_id=None,
-                            title="No Equipment Registered",
-                            message="A user attempted to report an issue, but no equipment is configured for this company. Please add equipment via the Admin Portal to allow issue reporting.",
-                            metadata={"user_input": full_report}
-                        )
-                except Exception as e:
-                    logger.error(f"Failed to create admin notification: {e}")
-
-            return {
-                "intake_phase": "symptoms",
-                "problem_description": "",
-                "machine_name": "",
-                "reported_symptoms": "",
-                "clarification_question": "⚠️ Your company currently has no registered equipment. I have notified the system administrator. Please wait until equipment is added before reporting an issue.",
-                "status": "CLARIFICATION_NEEDED",
-                "current_node": "problem_intake",
-                "no_equipment_notified": True,
-            }
+        eq_list = list(fetch_all_equipment(company_id=company_id) or [])
     except Exception as e:
         logger.error(f"Failed equipment check in intake: {e}")
+        eq_list = []
+
+    if not eq_list:
+        if not state.get("no_equipment_notified"):
+            try:
+                from src.db.session import SessionLocal
+                from src.db.crud import create_admin_notification
+                with SessionLocal() as db:
+                    create_admin_notification(
+                        db,
+                        company_id=company_id,
+                        notification_type="SYSTEM_ALERT",
+                        incident_id=None,
+                        title="No Equipment Registered",
+                        message="A user attempted to report an issue, but no equipment is configured for this company. Please add equipment via the Admin Portal to allow issue reporting.",
+                        metadata={"user_input": full_report}
+                    )
+            except Exception as e:
+                logger.error(f"Failed to create admin notification: {e}")
+
+        return {
+            "intake_phase": "symptoms",
+            "problem_description": "",
+            "machine_name": "",
+            "reported_symptoms": "",
+            "clarification_question": "⚠️ Your company currently has no registered equipment. I have notified the system administrator. Please wait until equipment is added before reporting an issue.",
+            "status": "CLARIFICATION_NEEDED",
+            "current_node": "problem_intake",
+            "no_equipment_notified": True,
+        }
 
     # Only clarification turns — proper conversation memory
     qa_history: list[dict] = [
@@ -266,7 +263,7 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
     ]
 
     original = _original_report(full_report)
-    machine_list = _machine_list_text(company_id)
+    machine_list = _machine_list_text_from_records(eq_list)
 
     # ── Absolute phase lock: if symptoms already saved → go to machine ─
     # This prevents the LLM from re-asking symptoms on any re-entry.

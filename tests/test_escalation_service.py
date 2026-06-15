@@ -54,6 +54,7 @@ async def test_assign_available_expert_with_no_expert_leaves_waiting():
 async def test_assign_available_expert_with_online_expert_assigns():
     """When online_expert_ids provided, first expert is assigned."""
     from unittest.mock import AsyncMock, MagicMock
+
     esc = EscalationSession(
         id=uuid.uuid4(),
         company_id=1,
@@ -64,6 +65,9 @@ async def test_assign_available_expert_with_online_expert_assigns():
     session = AsyncMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=esc)
     session.flush = AsyncMock()
+    exec_row = MagicMock()
+    exec_row.scalar_one_or_none.return_value = 100
+    session.execute = AsyncMock(return_value=exec_row)
 
     svc = EscalationService(session)
     result = await svc.assign_available_expert(
