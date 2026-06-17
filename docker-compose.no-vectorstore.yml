@@ -18,7 +18,7 @@ services:
     container_name: decisio-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-decisio}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -37,8 +37,8 @@ services:
     image: qdrant/qdrant:v1.12.0
     container_name: decisio-qdrant
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
     environment:
@@ -51,12 +51,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-decisio}}
+      DATABASE_URL: ${DATABASE_URL}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       DECISIO_EMBEDDING_MODEL: ${DECISIO_EMBEDDING_MODEL:-text-embedding-3-small}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       WS_BASE_URL: ${WS_BASE_URL:-http://localhost:8000}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     command: sh -c "alembic upgrade head && exec uvicorn api:app --host 0.0.0.0 --port 8000"

@@ -3,12 +3,14 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: decisio-postgres
+    # Bind to localhost only — never expose PostgreSQL to the internet.
+    # Connect from the host via: psql -h 127.0.0.1 -p 5434 -U postgres decisio
+    # Or use an SSH tunnel: ssh -L 5434:127.0.0.1:5434 user@server
     ports:
-      # Host port (avoids clashing with other local Postgres on 5432/5433)
-      - "${DECISIO_POSTGRES_PORT:-5434}:5432"
+      - "127.0.0.1:${DECISIO_POSTGRES_PORT:-5434}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-decisio}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -17,21 +19,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     container_name: decisio-redis
+    # Bind to localhost only — Redis has no auth by default.
     ports:
-      # Host port (avoids clashing with other local Redis on 6379)
-      - "${DECISIO_REDIS_PORT:-6380}:6379"
+      - "127.0.0.1:${DECISIO_REDIS_PORT:-6380}:6379"
     restart: unless-stopped
 
   qdrant:
     image: qdrant/qdrant:v1.12.0
     container_name: decisio-qdrant
+    # Bind to localhost only — Qdrant REST/gRPC has no auth by default.
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
     environment:
@@ -44,11 +48,11 @@ services:
     ports:
       - "8020:8020"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-decisio}}
+      DATABASE_URL: ${DATABASE_URL}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       WS_BASE_URL: ${WS_BASE_URL:-http://localhost:8020}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     command: sh -c "alembic upgrade head && exec uvicorn api:app --host 0.0.0.0 --port 8020"
