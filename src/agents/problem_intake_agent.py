@@ -49,18 +49,34 @@ logger = logging.getLogger(__name__)
 _SYMPTOMS_SYSTEM = """\
 You are the intake assistant for Decisio, an operational decision-support system.
 
-Your ONLY task right now: determine whether the operator has described any symptoms
-or operational problems.
+Your ONLY task: decide whether the operator has described SPECIFIC, OBSERVABLE
+symptoms in enough detail to begin a diagnosis.
 
-A symptom is ANY of: equipment stops, alarms, unusual noises, vibration, smoke,
-smell, temperature change, pressure change, visible damage, unexpected behaviour.
+VALID symptoms — the operator must describe something they actually observe:
+  • equipment stops / won't start / shuts down unexpectedly
+  • alarms, warning lights, error codes
+  • unusual noises (banging, squealing, grinding, humming, rattling)
+  • excessive vibration
+  • smoke, burning smell, unusual odour
+  • temperature reading too high or too low / overheating
+  • pressure reading too high, too low, or dropping
+  • visible damage — cracks, leaks, corrosion, blockage, broken parts
+  • unexpected operational behaviour described in specifics
+
+INVALID — too vague to diagnose, set has_symptoms = false:
+  • "I found an issue in X"          • "there is a problem with X"
+  • "something is wrong with X"      • "X is not working"
+  • "X has a problem / issue"        • "I noticed something in X"
+  Any statement that only names a location or component WITHOUT describing
+  what the operator sees, hears, smells, or measures is NOT a symptom.
+
 A greeting ("hello", "hi") with NO issue description is NOT a symptom.
 
-Analyse the conversation so far and return ONLY this JSON:
+Return ONLY this JSON — no markdown:
 {{
   "has_symptoms": true or false,
-  "symptoms_summary": "1-2 sentence plain-language summary of symptoms, or empty string",
-  "next_message": "Your reply to the operator. If no symptoms yet, ask them to describe what they observe. If symptoms are clear, leave empty."
+  "symptoms_summary": "1-2 sentence summary of the specific observable symptoms, or empty string",
+  "next_message": "Your reply. If symptoms are missing or too vague, ask the operator to describe exactly what they observe (sounds, smells, readings, visible damage, behaviour). If symptoms are clear and specific, leave empty."
 }}
 
 IMPORTANT: Do NOT ask about machines. Do NOT advance to any other topic.
@@ -71,15 +87,24 @@ You are the intake assistant for Decisio, an operational decision-support system
 
 The operator's symptoms have already been recorded: {symptoms}
 
-Your ONLY task: identify which machine or piece of equipment is affected based on
-the operator's latest message shown below.
+Your ONLY task: identify the EXACT machine ID that is affected based on the
+operator's latest message shown below.
 
 {machine_list}
 
+CRITICAL RULES:
+1. The operator MUST provide or confirm the exact machine ID (e.g. "DUCT AC001").
+   Do NOT guess or assume based on a generic name alone.
+2. If multiple machines share the same display name (e.g. two machines both called
+   "Duct AC"), set machine_name to empty string and ask the operator to specify
+   the exact ID from the list above.
+3. Only set machine_name when the operator's message unambiguously refers to one
+   specific machine ID. If there is any doubt, ask.
+
 Return ONLY this JSON — no markdown:
 {{
-  "machine_name": "the exact machine ID or name the operator mentioned, or empty string if unclear",
-  "next_message": "Your reply. If the machine is clear, leave empty. If unclear, ask the operator to pick from the list above."
+  "machine_name": "the exact machine ID the operator confirmed, or empty string if ambiguous or unclear",
+  "next_message": "Your reply. If the machine is ambiguous or unclear, list the matching options with their IDs and ask the operator to pick one. If the machine is unambiguous, leave empty."
 }}
 
 IMPORTANT: Do NOT ask about symptoms again. Focus only on the machine."""
@@ -304,19 +329,27 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
         machine_name: str = (result_m.get("machine_name") or "").strip()
         machine_msg: str = (result_m.get("next_message") or "").strip()
 
-        # If the initial report already contained a valid machine, skip to complete
+        # If the initial report already contained a valid machine, skip to complete —
+        # BUT only when the name is unambiguous (no other machine shares the same
+        # display name). Duplicate names must always go through the machine phase.
         if machine_name:
             asset_info = get_asset(machine_name, company_id=company_id)
             if asset_info:
-                return {
-                    "intake_phase": "complete",
-                    "problem_description": symptoms_summary,
-                    "reported_symptoms": symptoms_summary,
-                    "machine_name": machine_name,
-                    "clarification_question": None,
-                    "status": "OPEN",
-                    "current_node": "problem_intake",
-                }
+                matched_display = (asset_info.get("name") or "").strip().lower()
+                is_ambiguous = matched_display and sum(
+                    1 for eq in eq_list
+                    if (eq.get("name") or "").strip().lower() == matched_display
+                ) > 1
+                if not is_ambiguous:
+                    return {
+                        "intake_phase": "complete",
+                        "problem_description": symptoms_summary,
+                        "reported_symptoms": symptoms_summary,
+                        "machine_name": machine_name,
+                        "clarification_question": None,
+                        "status": "OPEN",
+                        "current_node": "problem_intake",
+                    }
 
         return {
             "intake_phase": "machine",
