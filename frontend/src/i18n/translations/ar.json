@@ -538,5 +538,59 @@
         "newPassword": "كلمة مرور جديدة (اتركه فارغًا للإبقاء على الحالية)"
       }
     }
+  },
+  "referencesPage": {
+    "title": "المراجع",
+    "sidebar": "المراجع",
+    "empty": "لا توجد مصادر مرجعية بعد. أضف إدخال نصي أو ارفع مستنداً.",
+    "addText": "+ إضافة معرفة نصية",
+    "uploadDocs": "+ رفع مستندات",
+    "table": {
+      "title": "العنوان",
+      "type": "النوع",
+      "category": "التصنيف",
+      "scope": "النطاق",
+      "status": "الحالة",
+      "chunks": "الأجزاء",
+      "equipment": "المعدات المرتبطة",
+      "created": "تاريخ الإنشاء",
+      "actions": "الإجراءات"
+    },
+    "scope": {
+      "company_wide": "على مستوى الشركة",
+      "equipment_specific": "خاص بمعدة"
+    },
+    "status": {
+      "processing": "جارٍ المعالجة",
+      "active": "نشط",
+      "failed": "فشل",
+      "archived": "مؤرشف"
+    },
+    "category": {
+      "manual": "دليل",
+      "document": "مستند",
+      "sop": "إجراء تشغيلي",
+      "knowledge": "معرفة"
+    },
+    "form": {
+      "titleLabel": "العنوان",
+      "categoryLabel": "التصنيف",
+      "scopeLabel": "النطاق",
+      "problemLabel": "المشكلة",
+      "solutionLabel": "الحل",
+      "tagsLabel": "الوسوم (مفصولة بفاصلة)",
+      "equipmentLabel": "ربط بمعدة",
+      "filesLabel": "الملفات (.pdf, .docx, .txt)",
+      "submitText": "إضافة إدخال نصي",
+      "uploadSubmit": "رفع",
+      "cancel": "إلغاء"
+    },
+    "errors": {
+      "titleRequired": "العنوان مطلوب.",
+      "problemRequired": "وصف المشكلة مطلوب.",
+      "solutionRequired": "الحل مطلوب.",
+      "filesRequired": "يرجى اختيار ملف واحد على الأقل.",
+      "equipmentRequired": "اختر معدة واحدة على الأقل للنطاق الخاص بالمعدة."
+    }
   }
 }

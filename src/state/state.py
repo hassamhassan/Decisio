@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
@@ -202,6 +203,23 @@ class Hypothesis(BaseModel):
     )
 
 
+class ActionType(str, Enum):
+    """Machine-validatable action types for decision options."""
+    controlled_shutdown = "controlled_shutdown"
+    isolate_and_lockout = "isolate_and_lockout"
+    transfer_to_standby_equipment = "transfer_to_standby_equipment"
+    authorized_inspection = "authorized_inspection"
+    escalate_to_maintenance = "escalate_to_maintenance"
+    hold_restart_pending_clearance = "hold_restart_pending_clearance"
+    reduce_load = "reduce_load"
+    continue_operation = "continue_operation"
+    restart_equipment = "restart_equipment"
+    bypass_protection = "bypass_protection"
+    physical_intervention_while_running = "physical_intervention_while_running"
+    add_lubricant_while_running = "add_lubricant_while_running"
+    unknown = "unknown"
+
+
 class DecisionOption(BaseModel):
     """A single decision option in the Decision Brief."""
 
@@ -217,6 +235,28 @@ class DecisionOption(BaseModel):
     blocked_by_safety: bool = Field(
         default=False,
         description="True when option violates active safety blocks; must not be recommended (§6.7)",
+    )
+
+    # ── Structured / machine-validatable fields (§D enhancement) ─────
+    action_type: str = Field(
+        default="unknown",
+        description="Machine-validatable action type from ActionType enum",
+    )
+    preconditions: list[str] = Field(
+        default_factory=list,
+        description="Conditions that must be true before this option can be executed",
+    )
+    risks_or_tradeoffs: list[str] = Field(
+        default_factory=list,
+        description="Explicit risks and tradeoffs of this option",
+    )
+    source_reference_ids: list[str] = Field(
+        default_factory=list,
+        description="Retrieved reference chunks cited by this option, format: 'uuid#chunk_index'",
+    )
+    safety_notes: list[str] = Field(
+        default_factory=list,
+        description="Safety notes specifically for this option",
     )
 
 
@@ -354,6 +394,17 @@ class DecisioState(TypedDict, total=False):
     diagnostic_steps_completed: list[int]  # Which of the 10 steps have been answered
     retrieval_confidence: float  # How well Decision Memory patterns matched
     memory_guidance: str  # Human-readable hint when a strong memory match exists
+
+    # ── Retrieval Traces ─────────────────────────────────────────────
+    # Structured trace from the last reference retrieval in question_agent
+    question_reference_trace: dict[str, Any]
+    # Structured trace from the reference retrieval in decision_brief_agent
+    brief_reference_trace: dict[str, Any]
+
+    # ── Reference code direct lookup ─────────────────────────────────
+    reference_code_answer: str
+    reference_code_trace: dict[str, Any]
+    reference_code_lookup_complete: bool
 
     # ── Messages (LLM chat history) ─────────────────────────────────
     messages: list[Any]

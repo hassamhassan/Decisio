@@ -55,6 +55,7 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       WS_BASE_URL: ${WS_BASE_URL:-http://localhost:8020}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DECISIO_ENABLE_RETRIEVAL_DEBUG: ${DECISIO_ENABLE_RETRIEVAL_DEBUG:-false}
     command: sh -c "alembic upgrade head && exec uvicorn api:app --host 0.0.0.0 --port 8020"
     depends_on:
       postgres: { condition: service_healthy }

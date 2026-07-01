@@ -12,6 +12,7 @@ from src.agents.hypothesis_agent import hypothesis_update_agent
 from src.agents.safety_agent import safety_constraint_agent
 from src.agents.post_answer_parallel_agent import post_answer_parallel_agent
 from src.agents.post_intake_parallel_agent import post_intake_parallel_agent
+from src.agents.reference_code_agent import reference_code_lookup_agent
 from src.agents.decision_brief_agent import decision_brief_agent
 from src.agents.escalation_agent import escalation_agent
 from src.agents.outcome_capture_agent import outcome_capture_agent
@@ -28,42 +29,68 @@ from src.state.state import (
 # ── Router functions ─────────────────────────────────────────────────
 
 
+def _user_text_for_code_routing(state: DecisioState) -> str:
+    """Text used for reference-code intent classification in graph routers."""
+    if state is None:
+        return ""
+    return (state.get("report") or state.get("problem_description") or "").strip()
+
+
+def _reference_code_route(state: DecisioState) -> str | None:
+    """
+    Return 'reference_code_lookup' when the user message is a code lookup request.
+
+    Called before normal incident intake / diagnosis routing.
+    """
+    from src.services.reference_code_service import classify_reference_code_intent
+
+    intent = classify_reference_code_intent(_user_text_for_code_routing(state))
+    if intent in ("code_only", "code_with_incident"):
+        return "reference_code_lookup"
+    return None
+
+
 def pre_intake_router(state: DecisioState) -> str:
     """
     Route after problem_intake.
 
     Contract with the API:
-    - If `clarification_question` is present in state, we END the graph run.
-      The FastAPI layer detects this field in the response and sends the
-      clarification question to the user. When the user replies, their
-      answer is appended to `state['report']` and the intake_graph is
-      invoked again (see `/api/incidents/{id}/answer` in `api.py`).
-    - If no clarification is needed, proceed to `incident_intake`.
+    - Reference-code queries route to lookup before incident intake or diagnosis.
+    - If `clarification_question` is present, END the graph run (clarification loop).
+    - Otherwise proceed to `incident_intake` for normal incidents.
     """
     if state is None:
         state = {}
+    code_route = _reference_code_route(state)
+    if code_route:
+        return code_route
     if state.get("clarification_question"):
-        # We need clarification (problem or machine name is missing).
-        # Returning the special key "end" routes this node to END; the
-        # outer API loop will handle asking the question and re-running
-        # intake_graph after the user answers.
         return "end"
-    
-    # Otherwise, it's clear enough to build an incident card
     return "incident_intake"
 
 
 def post_screening_router(state: DecisioState) -> str:
-    """Route after screening: escalate or first diagnostic question.
-
-    Decision Memory (vector) retrieval runs later — after Q&A — via
-    ``post_qa_retrieval``, only when routing to the decision brief.
-    """
+    """Route after screening: code lookup (if not done), escalate, or first diagnostic question."""
     if state is None:
         state = {}
     if state.get("escalation_triggered"):
         return "escalation"
+    # code_with_incident: lookup already ran before intake — continue diagnosis
+    if state.get("reference_code_answer") and not state.get("reference_code_lookup_complete"):
+        return "question_generation"
+    code_route = _reference_code_route(state)
+    if code_route:
+        return code_route
     return "question_generation"
+
+
+def post_reference_code_router(state: DecisioState) -> str:
+    """After code lookup: END for code-only; incident intake for code+incident."""
+    if state is None:
+        state = {}
+    if state.get("reference_code_lookup_complete"):
+        return "end"
+    return "incident_intake"
 
 
 def diagnosis_router(state: DecisioState) -> str:
@@ -152,6 +179,7 @@ def build_graph() -> StateGraph:
     graph.add_node("screening", screening_agent)
     # Parallel: screening + early retrieval (incident_card-only).
     graph.add_node("post_intake_parallel", post_intake_parallel_agent)
+    graph.add_node("reference_code_lookup", reference_code_lookup_agent)
     graph.add_node("question_generation", question_agent)
     graph.add_node("answer_interpreter", answer_interpreter_agent)
     # Parallelize expensive post-answer work to reduce latency.
@@ -176,6 +204,7 @@ def build_graph() -> StateGraph:
         pre_intake_router,
         {
             "incident_intake": "incident_intake",
+            "reference_code_lookup": "reference_code_lookup",
             "end": END,
         },
     )
@@ -188,6 +217,16 @@ def build_graph() -> StateGraph:
         {
             "question_generation": "question_generation",
             "escalation": "escalation",
+            "reference_code_lookup": "reference_code_lookup",
+        },
+    )
+
+    graph.add_conditional_edges(
+        "reference_code_lookup",
+        post_reference_code_router,
+        {
+            "end": END,
+            "incident_intake": "incident_intake",
         },
     )
 

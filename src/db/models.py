@@ -466,3 +466,79 @@ class KnowledgeEntry(Base):
         onupdate=func.now(),
     )
 
+
+# ── Unified Reference Sources ────────────────────────────────────────
+
+
+class ReferenceSource(Base):
+    """Unified reference library: OEM manuals, SOPs, documents, and KB text entries.
+
+    Replaces the split between `knowledge_entries` (text-only) and the single
+    per-equipment manual upload.  Supports multi-document, multi-tenant, with
+    explicit scope and async Qdrant ingestion.
+
+    source_type: 'text' | 'file'
+    category:    'manual' | 'document' | 'sop' | 'knowledge'  (label only)
+    scope:       'company_wide' | 'equipment_specific'
+    status:      'processing' | 'active' | 'failed' | 'archived'
+    """
+
+    __tablename__ = "reference_sources"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    title = Column(String(256), nullable=False)
+    source_type = Column(String(16), nullable=False)
+    category = Column(String(32), nullable=False)
+    scope = Column(String(24), nullable=False)
+
+    problem = Column(Text, nullable=True)
+    solution = Column(Text, nullable=True)
+    tags = Column(JSONB, default=list)
+
+    source_filename = Column(String(255), nullable=True)
+    content_hash = Column(String(64), nullable=True)
+
+    status = Column(String(16), nullable=False, default="processing")
+    processing_error = Column(Text, nullable=True)
+    chunk_count = Column(Integer, nullable=False, default=0)
+
+    legacy_manual_key = Column(String(64), nullable=True, index=True)
+    legacy_knowledge_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    company = relationship("Company", foreign_keys=[company_id])
+    equipment_links = relationship(
+        "ReferenceEquipmentLink",
+        back_populates="reference_source",
+        cascade="all, delete-orphan",
+    )
+
+
+class ReferenceEquipmentLink(Base):
+    """Maps a ReferenceSource to specific equipment (equipment_specific scope).
+
+    Empty rows for company_wide sources — enforced at API layer.
+    Denormalised company_id for fast tenant-scoped queries.
+    """
+
+    __tablename__ = "reference_equipment_links"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    reference_source_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("reference_sources.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    equipment_id = Column(String(32), nullable=False)
+    company_id = Column(Integer, nullable=False)
+
+    reference_source = relationship("ReferenceSource", back_populates="equipment_links")

@@ -237,6 +237,19 @@ def problem_intake_agent(state: DecisioState) -> DecisioState:
             "current_node": "problem_intake",
         }
 
+    # Reference-code lookup: skip symptom/machine clarification for code queries
+    from src.services.reference_code_service import classify_reference_code_intent
+    code_intent = classify_reference_code_intent(full_report)
+    if code_intent in ("code_only", "code_with_incident"):
+        return {
+            "intake_phase": "complete",
+            "problem_description": full_report,
+            "machine_name": "",
+            "reported_symptoms": "",
+            "clarification_question": None,
+            "current_node": "problem_intake",
+        }
+
     # Re-entry guard
     if state.get("intake_phase") == "complete":
         return {"intake_phase": "complete", "current_node": "problem_intake"}

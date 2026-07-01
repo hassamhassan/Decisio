@@ -284,19 +284,34 @@ def question_agent(state: DecisioState) -> DecisioState:
         or (incident_card.get("normalized_summary") or "")
     )
 
+    _question_trace: dict = {}
+
     def _load_manual() -> list:
+        nonlocal _question_trace
         if manual_limit <= 0 or not incident_asset or company_id is None:
             return []
         try:
-            from src.services.manual_service import retrieve_manual_chunks
-            return retrieve_manual_chunks(
+            from src.services.reference_service import retrieve_with_trace
+            result = retrieve_with_trace(
+                company_id=int(company_id),
                 equipment_id=incident_asset,
                 query_text=query_for_manual or incident_asset,
-                company_id=int(company_id),
                 limit=manual_limit,
             )
+            _question_trace = result.get("trace", {})
+            return result.get("chunks", [])
         except Exception:
-            return []
+            # Fallback to legacy manual service if reference_service unavailable
+            try:
+                from src.services.manual_service import retrieve_manual_chunks
+                return retrieve_manual_chunks(
+                    equipment_id=incident_asset,
+                    query_text=query_for_manual or incident_asset,
+                    company_id=int(company_id),
+                    limit=manual_limit,
+                )
+            except Exception:
+                return []
 
     manual_pool: ThreadPoolExecutor | None = None
     manual_fut = None
@@ -377,9 +392,10 @@ def question_agent(state: DecisioState) -> DecisioState:
                 manual_chunks = []
 
         if manual_chunks:
-            context_parts += ["", "=== EQUIPMENT MANUAL CONTEXT (use this for precise component names & procedures) ==="]
+            context_parts += ["", "=== REFERENCE CONTEXT (use this for precise component names, procedures & known fixes) ==="]
             for chunk in manual_chunks:
-                context_parts.append(f"[From manual, relevance {chunk['score']:.0%}]")
+                label = chunk.get("title") or chunk.get("source_filename") or "reference"
+                context_parts.append(f"[{label}, relevance {chunk['score']:.0%}]")
                 context_parts.append(chunk["text"])
 
         context_parts += [
@@ -492,7 +508,7 @@ def question_agent(state: DecisioState) -> DecisioState:
 
     prev_count = state.get("questions_asked_count", 0)
 
-    return {
+    ret: dict = {
         "questions": validated_questions,
         # NOTE: do NOT return current_diagnostic_step here.
         # advance_diagnostic_step (which runs before this node) already
@@ -503,3 +519,6 @@ def question_agent(state: DecisioState) -> DecisioState:
         "status": "DIAGNOSIS_LOOP",
         "current_node": "question_generation",
     }
+    if _question_trace:
+        ret["question_reference_trace"] = _question_trace
+    return ret

@@ -11,6 +11,15 @@ function normalizeQuestionText(s) {
     return s.trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
+/** True when the incident ended after a direct reference-code lookup (no diagnosis loop). */
+function isCodeLookupComplete(data) {
+    if (!data) return false
+    return Boolean(
+        data.reference_code_lookup_complete ||
+        data.status === 'CODE_LOOKUP_COMPLETE'
+    )
+}
+
 export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin }) {
     const { lang, dir, t, toggleLang } = useI18n()
     const [messages, setMessages] = useState([])
@@ -77,7 +86,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                     msgs.push({ id: Math.random(), type: 'user', content: cleanReport })
                 }
             }
-            if (data.incident_card) {
+            if (data.incident_card && !isCodeLookupComplete(data)) {
                 msgs.push({ id: Math.random(), type: 'system', content: { type: 'incident_card', data: data.incident_card } })
                 if (data.memory_guidance) {
                     msgs.push({ id: Math.random(), type: 'system', content: { type: 'memory_guidance', message: data.memory_guidance } })
@@ -88,10 +97,34 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
             }
             if (data.qa_history && data.qa_history.length > 0) {
                 data.qa_history.forEach(qa => {
-                    msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: [{ category: qa.category || 'clarification', question: qa.question }] } })
+                    if (qa.category === 'clarification') {
+                        msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: [{ category: qa.category || 'clarification', question: qa.question }] } })
+                    } else {
+                        msgs.push({
+                            id: Math.random(),
+                            type: 'system',
+                            content: {
+                                type: 'questions',
+                                data: [{ category: qa.category || 'general', question: qa.question }],
+                                step: qa.diagnostic_step,
+                                referenceTrace: qa.reference_trace || null,
+                            },
+                        })
+                    }
                     if (qa.answer) {
                         msgs.push({ id: Math.random(), type: 'user', content: qa.answer })
                     }
+                })
+            }
+            if (data.reference_code_answer) {
+                msgs.push({
+                    id: Math.random(),
+                    type: 'system',
+                    content: {
+                        type: 'reference_code_answer',
+                        text: data.reference_code_answer,
+                        referenceTrace: data.reference_code_trace || null,
+                    },
                 })
             }
             if (data.decision_brief) {
@@ -101,9 +134,10 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                 if (data.escalation) {
                     msgs.push({ id: Math.random(), type: 'system', content: { type: 'escalation', data: data.escalation } })
                 }
-                msgs.push({ id: Math.random(), type: 'system', content: { type: 'brief', data: data.decision_brief, escalationTriggered: data.escalation_triggered } })
+                msgs.push({ id: Math.random(), type: 'system', content: { type: 'brief', data: data.decision_brief, escalationTriggered: data.escalation_triggered, referenceTrace: data.brief_reference_trace || null } })
             }
             const pendingDiagnostic =
+                !isCodeLookupComplete(data) &&
                 !data.decision_brief &&
                 data.questions &&
                 data.questions.length > 0 &&
@@ -126,7 +160,16 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
             if (data.clarification_question) {
                 msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: [{ category: 'clarification', question: data.clarification_question }] } })
             } else if (showPendingDiagnostic) {
-                msgs.push({ id: Math.random(), type: 'system', content: { type: 'questions', data: data.questions, step: data.current_diagnostic_step } })
+                msgs.push({
+                    id: Math.random(),
+                    type: 'system',
+                    content: {
+                        type: 'questions',
+                        data: data.questions,
+                        step: data.current_diagnostic_step,
+                        referenceTrace: data.question_reference_trace || null,
+                    },
+                })
             }
             if (data.outcome && data.outcome !== 'pending') {
                 msgs.push({ id: Math.random(), type: 'system', content: { type: 'outcome_result', data } })
@@ -142,6 +185,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                 setChatMinimized(false)
                 setPhase('escalation_chat')
             } else if (data.decision_brief && data.outcome === 'pending') setPhase('outcome')
+            else if (data.reference_code_lookup_complete) setPhase('idle')
             else if (data.clarification_question || showPendingDiagnostic) setPhase('diagnosing')
             else setPhase('idle')
         } catch (err) {
@@ -189,6 +233,15 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                 if (data.clarification_question) {
                     addMessage('system', { type: 'questions', data: [{ category: 'clarification', question: data.clarification_question }] })
                     setPhase('diagnosing')
+                } else if (isCodeLookupComplete(data)) {
+                    if (data.reference_code_answer) {
+                        addMessage('system', {
+                            type: 'reference_code_answer',
+                            text: data.reference_code_answer,
+                            referenceTrace: data.reference_code_trace || null,
+                        })
+                    }
+                    setPhase('idle')
                 } else {
                     // Show incident card
                     addMessage('system', { type: 'incident_card', data: data.incident_card })
@@ -202,6 +255,14 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
 
                     // Show status
                     addMessage('system', { type: 'status', data })
+
+                    if (data.reference_code_answer) {
+                        addMessage('system', {
+                            type: 'reference_code_answer',
+                            text: data.reference_code_answer,
+                            referenceTrace: data.reference_code_trace || null,
+                        })
+                    }
 
                     if (data.escalation_triggered) {
                         // Generate brief if escalation triggered early in intake
@@ -217,13 +278,18 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                             }
                         }
                         addMessage('system', { type: 'escalation_notice', message: t('userPage.escalationMessages.requestSent') })
-                        addMessage('system', { type: 'brief', data: briefData.decision_brief, escalationTriggered: true })
+                        addMessage('system', { type: 'brief', data: briefData.decision_brief, escalationTriggered: true, referenceTrace: briefData.brief_reference_trace || null })
                         if (!briefData.escalation?.session_id) {
                             // Fallback: no session yet, stay in outcome so user can still see brief
                             setPhase('outcome')
                         }
                     } else if (data.questions?.length > 0) {
-                        addMessage('system', { type: 'questions', data: data.questions, step: data.current_diagnostic_step })
+                        addMessage('system', {
+                            type: 'questions',
+                            data: data.questions,
+                            step: data.current_diagnostic_step,
+                            referenceTrace: data.question_reference_trace || null,
+                        })
                         setPhase('diagnosing')
                     }
                 }
@@ -272,7 +338,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                     addMessage('system', { type: 'status', data })
 
                     if (data.decision_brief) {
-                        addMessage('system', { type: 'brief', data: data.decision_brief })
+                        addMessage('system', { type: 'brief', data: data.decision_brief, referenceTrace: data.brief_reference_trace || null })
                         setPhase('outcome')
                     } else if (data.escalation_triggered) {
                         // Generate brief if escalation triggered
@@ -288,18 +354,23 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                             }
                         }
                         addMessage('system', { type: 'escalation_notice', message: t('userPage.escalationMessages.complete') })
-                        addMessage('system', { type: 'brief', data: briefData.decision_brief, escalationTriggered: true })
+                        addMessage('system', { type: 'brief', data: briefData.decision_brief, escalationTriggered: true, referenceTrace: briefData.brief_reference_trace || null })
                         if (!briefData.escalation?.session_id) {
                             // Fallback: no session yet, stay in outcome so user can still see brief
                             setPhase('outcome')
                         }
                     } else if (data.questions?.length > 0) {
-                        addMessage('system', { type: 'questions', data: data.questions, step: data.current_diagnostic_step })
+                        addMessage('system', {
+                            type: 'questions',
+                            data: data.questions,
+                            step: data.current_diagnostic_step,
+                            referenceTrace: data.question_reference_trace || null,
+                        })
                     } else {
                         // No more questions, generate brief
                         const briefData = await generateBrief(data.incident_id, lang)
                         setIncident(briefData)
-                        addMessage('system', { type: 'brief', data: briefData.decision_brief })
+                        addMessage('system', { type: 'brief', data: briefData.decision_brief, referenceTrace: briefData.brief_reference_trace || null })
                         setPhase('outcome')
                     }
                 }
@@ -400,11 +471,17 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                     {incident && (
                         <>
                             <span>
-                                <span className={`status-dot ${incident.escalation_triggered ? 'danger' : incident.confidence >= 0.8 ? 'active' : 'warning'}`}></span>
+                                {!isCodeLookupComplete(incident) && (
+                                    <span className={`status-dot ${incident.escalation_triggered ? 'danger' : incident.confidence >= 0.8 ? 'active' : 'warning'}`}></span>
+                                )}
                                 {incident.status}
                             </span>
-                            <span>{t('userPage.risk')}: {incident.risk_score?.toFixed(1)}</span>
-                            <span>{t('userPage.confidence')}: {Math.round((incident.confidence || 0) * 100)}%</span>
+                            {!isCodeLookupComplete(incident) && (
+                                <>
+                                    <span>{t('userPage.risk')}: {incident.risk_score?.toFixed(1)}</span>
+                                    <span>{t('userPage.confidence')}: {Math.round((incident.confidence || 0) * 100)}%</span>
+                                </>
+                            )}
                         </>
                     )}
                     {(phase === 'closed' || phase === 'escalation_chat') && (
@@ -516,7 +593,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
                                     </>
                                 )}
 
-                                {msg.type === 'system' && renderSystemMessage(msg.content, handleOutcomeButton, phase, t)}
+                                {msg.type === 'system' && renderSystemMessage(msg.content, handleOutcomeButton, phase, t, user)}
                             </div>
                         ))}
 
@@ -663,7 +740,7 @@ export default function IncidentConsole({ user, onLogout, onAdmin, onSuperAdmin 
     )
 }
 
-function renderSystemMessage(content, onOutcome, phase, t) {
+function renderSystemMessage(content, onOutcome, phase, t, user) {
     if (typeof content === 'string') {
         const contentDir = resolveTextDirection(content, 'ltr')
         return <div dir={contentDir} className="bidi-text">{content}</div>
@@ -673,11 +750,27 @@ function renderSystemMessage(content, onOutcome, phase, t) {
         case 'incident_card':
             return <IncidentCard data={content.data} t={t} />
         case 'questions':
-            return <Questions data={content.data} step={content.step} t={t} />
+            return (
+                <Questions
+                    data={content.data}
+                    step={content.step}
+                    referenceTrace={content.referenceTrace}
+                    isAdmin={user?.user_type === 'admin' || user?.user_type === 'super_admin'}
+                    t={t}
+                />
+            )
+        case 'reference_code_answer':
+            return (
+                <ReferenceCodeAnswer
+                    text={content.text}
+                    referenceTrace={content.referenceTrace}
+                    isAdmin={user?.user_type === 'admin' || user?.user_type === 'super_admin'}
+                />
+            )
         case 'status':
             return <StatusBar data={content.data} t={t} />
         case 'brief':
-            return <DecisionBrief data={content.data} onOutcome={onOutcome} showOutcome={phase === 'outcome'} escalationTriggered={content.escalationTriggered} t={t} />
+            return <DecisionBrief data={content.data} onOutcome={onOutcome} showOutcome={phase === 'outcome'} escalationTriggered={content.escalationTriggered} referenceTrace={content.referenceTrace} isAdmin={user?.user_type === 'admin' || user?.user_type === 'super_admin'} t={t} />
         case 'patterns':
             return <Patterns data={content.data} t={t} />
         case 'memory_guidance':
@@ -762,9 +855,10 @@ function IncidentCard({ data, t }) {
 }
 
 
-function Questions({ data, step, t }) {
+function Questions({ data, step, referenceTrace, isAdmin, t }) {
     if (!data?.length) return null
     const stepLabel = step ? t('userPage.questions.stepFormat', { step }) : ''
+    const isDiagnostic = !data.some(q => q.category === 'clarification')
 
     return (
         <>
@@ -782,12 +876,40 @@ function Questions({ data, step, t }) {
                     </div>
                 ))}
             </div>
+            {isDiagnostic && (
+                <ReferencesUsedPanel
+                    trace={referenceTrace}
+                    isAdmin={isAdmin}
+                    title={referenceTrace?.retrieved_hits?.length
+                        ? `References Used for This Question (${referenceTrace.retrieved_hits.length})`
+                        : 'References Used for This Question'}
+                />
+            )}
+        </>
+    )
+}
+
+
+function ReferenceCodeAnswer({ text, referenceTrace, isAdmin }) {
+    if (!text) return null
+    return (
+        <>
+            <div className="message-label">Reference Code</div>
+            <div className="reference-code-answer" style={{ fontSize: '14px', lineHeight: 1.55, color: 'var(--text-bright)', marginBottom: '8px' }}>
+                <span dir={resolveTextDirection(text, 'ltr')} className="bidi-text">{text}</span>
+            </div>
+            <ReferencesUsedPanel trace={referenceTrace} isAdmin={isAdmin} title={
+                referenceTrace?.retrieved_hits?.length
+                    ? `References Used (${referenceTrace.retrieved_hits.length})`
+                    : 'References Used'
+            } />
         </>
     )
 }
 
 
 function StatusBar({ data, t }) {
+    if (isCodeLookupComplete(data)) return null
     return (
         <div className="status-bar">
             <span className="status-chip">{t('userPage.statusBar.risk')} <strong>{data.risk_score?.toFixed(1)}</strong></span>
@@ -808,7 +930,57 @@ function StatusBar({ data, t }) {
 }
 
 
-function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered, t }) {
+function ReferencesUsedPanel({ trace, isAdmin, title = 'References Used' }) {
+    const [expanded, setExpanded] = useState(false)
+    if (!trace || !trace.retrieved_hits || trace.retrieved_hits.length === 0) return null
+
+    const hits = trace.retrieved_hits
+    const panelTitle = title.includes('(') ? title : `${title} (${hits.length})`
+    return (
+        <div className="ref-trace-panel">
+            <button
+                className="ref-trace-toggle"
+                onClick={() => setExpanded(e => !e)}
+                aria-expanded={expanded}
+            >
+                <span className="ref-trace-icon">{expanded ? '▾' : '▸'}</span>
+                {panelTitle}
+            </button>
+            {expanded && (
+                <div className="ref-trace-body">
+                    {hits.map((hit, i) => {
+                        const equip = hit.equipment_ids?.length ? hit.equipment_ids.join(', ') : 'Company-wide'
+                        const scopeLabel = hit.scope === 'company_wide' ? 'Company-wide' : `Equipment-specific · ${equip}`
+                        const catLabel = (hit.category || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+                        return (
+                            <div key={i} className="ref-trace-hit">
+                                <div className="ref-trace-hit-title">{hit.title || 'Reference'}</div>
+                                <div className="ref-trace-hit-meta">
+                                    {catLabel}
+                                    {' · '}
+                                    {scopeLabel}
+                                    {' · '}
+                                    <span className="ref-trace-score">Relevance {(hit.score * 100).toFixed(0)}%</span>
+                                    {isAdmin && (
+                                        <span className="ref-trace-admin-meta">
+                                            {' · '}ID: {hit.reference_source_id}
+                                            {' · '}Chunk #{hit.chunk_index}
+                                        </span>
+                                    )}
+                                </div>
+                                {hit.excerpt && (
+                                    <div className="ref-trace-excerpt">"{hit.excerpt}"</div>
+                                )}
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
+        </div>
+    )
+}
+
+function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered, referenceTrace, isAdmin, t }) {
     const [selectedOption, setSelectedOption] = useState(null)
     const [showSolution, setShowSolution] = useState(false)
     const [solutionText, setSolutionText] = useState('')
@@ -865,6 +1037,8 @@ function DecisionBrief({ data, onOutcome, showOutcome, escalationTriggered, t })
                         {t('userPage.decisionBrief.safety')}: {data.safety_constraints.join(' • ')}
                     </div>
                 )}
+
+                <ReferencesUsedPanel trace={referenceTrace} isAdmin={isAdmin} title="References Used" />
 
                 {showOutcome && (
                     <>

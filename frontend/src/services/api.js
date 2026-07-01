@@ -432,3 +432,79 @@ export async function deleteKnowledgeEntry(entryId) {
         method: 'DELETE',
     });
 }
+
+// ── Admin Reference Sources API ───────────────────────────────────
+
+export async function listReferenceSources({ equipmentId, category, status, scope } = {}) {
+    const params = new URLSearchParams();
+    if (equipmentId) params.set('equipment_id', equipmentId);
+    if (category) params.set('category', category);
+    if (status) params.set('status', status);
+    if (scope) params.set('scope', scope);
+    const qs = params.toString();
+    return apiFetch(`${API_BASE}/admin/reference-sources${qs ? `?${qs}` : ''}`);
+}
+
+export async function getReferenceSource(refId) {
+    return apiFetch(`${API_BASE}/admin/reference-sources/${refId}`);
+}
+
+export async function createTextReferenceSource(data) {
+    return apiFetch(`${API_BASE}/admin/reference-sources/text`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function uploadReferenceSources({ files, category = 'manual', scope = 'equipment_specific', equipmentIds = [] }) {
+    const token = getToken();
+    const formData = new FormData();
+    for (const file of files) {
+        formData.append('files', file);
+    }
+    formData.append('category', category);
+    formData.append('scope', scope);
+    formData.append('equipment_ids', equipmentIds.join(','));
+    const res = await fetch(`${API_BASE}/admin/reference-sources/upload`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.detail || `Upload failed (${res.status})`);
+    return data;
+}
+
+export async function updateReferenceSource(refId, updates) {
+    return apiFetch(`${API_BASE}/admin/reference-sources/${refId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates),
+    });
+}
+
+export async function updateReferenceScope(refId, scopeData) {
+    return apiFetch(`${API_BASE}/admin/reference-sources/${refId}/scope`, {
+        method: 'PUT',
+        body: JSON.stringify(scopeData),
+    });
+}
+
+export async function reuploadReferenceSource(refId, file) {
+    const token = getToken();
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/admin/reference-sources/${refId}/reupload`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.detail || `Reupload failed (${res.status})`);
+    return data;
+}
+
+export async function deleteReferenceSource(refId) {
+    return apiFetch(`${API_BASE}/admin/reference-sources/${refId}`, {
+        method: 'DELETE',
+    });
+}

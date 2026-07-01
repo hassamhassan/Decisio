@@ -89,7 +89,13 @@ Each option's description must:
 - If only symptom-level evidence exists (no confirmed root cause), the Conservative
   option MUST be the recommended one
 
-Return a JSON object with no markdown fences:
+Return a JSON object with no markdown fences.
+
+Each option MUST include an "action_type" from this exact list:
+  controlled_shutdown | isolate_and_lockout | transfer_to_standby_equipment |
+  authorized_inspection | escalate_to_maintenance | hold_restart_pending_clearance |
+  reduce_load | continue_operation | restart_equipment | bypass_protection |
+  physical_intervention_while_running | add_lubricant_while_running | unknown
 
 {
   "analysis_summary": "2-3 sentences naming the asset, confirmed findings from the Q&A, and the primary fault mode",
@@ -99,8 +105,13 @@ Return a JSON object with no markdown fences:
       "option_id": 1,
       "title": "Concrete, asset-specific title",
       "description": "What to do with the asset, under what conditions, with what outcome",
+      "action_type": "controlled_shutdown",
+      "preconditions": ["Condition that must be met before executing this option"],
       "risks": ["Specific risk tied to this asset and this option"],
+      "risks_or_tradeoffs": ["Explicit tradeoff or risk"],
       "constraints": ["Specific safety or operational constraint"],
+      "safety_notes": ["Safety-critical note for this option"],
+      "source_reference_ids": [],
       "confidence": 0.0,
       "recommended": false,
       "risk_level": "low | medium | medium-high | high",
@@ -183,25 +194,46 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
         for b in safety_blocks:
             context_parts.append(f"- ⛔ {b}")
 
-    # ── Equipment manual context from Qdrant ──────────────────────────
+    # ── Reference context from Qdrant (unified reference_sources) ─────
+    _brief_trace: dict = {}
     try:
-        from src.services.manual_service import retrieve_manual_chunks
-        manual_query = incident_card.get("normalized_summary", "") or asset_id
-        manual_chunks = retrieve_manual_chunks(
-            equipment_id=asset_id,
-            query_text=manual_query,
+        from src.services.reference_service import retrieve_with_trace
+        ref_query = incident_card.get("normalized_summary", "") or asset_id
+        ref_result = retrieve_with_trace(
             company_id=int(company_id) if company_id else 0,
+            equipment_id=asset_id or "",
+            query_text=ref_query,
             limit=4,
         )
-        if manual_chunks:
-            context_parts.append("\n=== EQUIPMENT MANUAL EXCERPTS ===")
-            for chunk in manual_chunks:
+        ref_chunks = ref_result.get("chunks", [])
+        _brief_trace = ref_result.get("trace", {})
+        if ref_chunks:
+            context_parts.append("\n=== REFERENCE CONTEXT ===")
+            for chunk in ref_chunks:
                 text = (chunk.get("text") or "").strip()
                 score = chunk.get("score", 0)
+                label = chunk.get("title") or chunk.get("source_filename") or "reference"
                 if text:
-                    context_parts.append(f"[relevance {score:.0%}] {text[:600]}")
+                    context_parts.append(f"[{label}, relevance {score:.0%}] {text[:600]}")
+        else:
+            # Fallback to legacy manual service during migration
+            from src.services.manual_service import retrieve_manual_chunks
+            manual_query = incident_card.get("normalized_summary", "") or asset_id
+            manual_chunks = retrieve_manual_chunks(
+                equipment_id=asset_id,
+                query_text=manual_query,
+                company_id=int(company_id) if company_id else 0,
+                limit=4,
+            )
+            if manual_chunks:
+                context_parts.append("\n=== REFERENCE CONTEXT ===")
+                for chunk in manual_chunks:
+                    text = (chunk.get("text") or "").strip()
+                    score = chunk.get("score", 0)
+                    if text:
+                        context_parts.append(f"[relevance {score:.0%}] {text[:600]}")
     except Exception as e:
-        logger.debug("Manual context unavailable for brief: %s", e)
+        logger.debug("Reference context unavailable for brief: %s", e)
 
     pat_block = format_retrieved_patterns_for_llm(
         retrieved_patterns,
@@ -305,6 +337,20 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
                 opt = {**opt, "blocked_by_safety": True, "recommended": False}
             else:
                 opt = {**opt, "blocked_by_safety": opt.get("blocked_by_safety", False)}
+            # Safe parser for action_type: accept only valid enum values, fallback to "unknown"
+            from src.state.state import ActionType
+            raw_action = (opt.get("action_type") or "unknown").strip().lower()
+            valid_action_values = {m.value for m in ActionType}
+            opt["action_type"] = raw_action if raw_action in valid_action_values else "unknown"
+            # Coerce list fields to list (guard against LLM returning strings)
+            for list_field in ("preconditions", "risks_or_tradeoffs", "source_reference_ids", "safety_notes"):
+                val = opt.get(list_field)
+                if val is None:
+                    opt[list_field] = []
+                elif isinstance(val, str):
+                    opt[list_field] = [val] if val.strip() else []
+                elif not isinstance(val, list):
+                    opt[list_field] = []
             o = DecisionOption(**opt)
             validated_options.append(o.model_dump())
         except Exception as e:
@@ -327,6 +373,119 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
                 if o.get("recommended"):
                     o["recommended"] = first
                     first = False
+
+    # ── Server-side safety policy validation ─────────────────────────
+    # Runs after LLM option generation. If violations found, regenerate once.
+    # If still invalid, return a deterministic safe fallback brief.
+    try:
+        from src.services.decision_safety_policy import (
+            validate_options as _validate_safety,
+            build_violation_feedback,
+            build_safe_fallback_brief,
+        )
+        escalation_state = state.get("escalation") or {}
+        safety_ok, violations = _validate_safety(
+            validated_options,
+            incident_card,
+            float(risk_score),
+            escalation_state,
+            safety_blocks,
+        )
+        if not safety_ok and violations:
+            logger.warning(
+                "Safety policy violations detected (%d). Attempting one regeneration. "
+                "Violations: %s",
+                len(violations),
+                [v["action_type"] for v in violations],
+            )
+            feedback = build_violation_feedback(violations)
+            regen_response = llm.invoke([
+                SystemMessage(content=SYSTEM_PROMPT + lang_instruction),
+                HumanMessage(content=context),
+                HumanMessage(content=feedback),
+            ])
+            regen_raw = _strip_fences(regen_response.content)
+            try:
+                regen_result = json.loads(regen_raw)
+            except json.JSONDecodeError:
+                regen_result = {}
+
+            regen_options_raw = regen_result.get("options") or []
+            regen_validated: list[dict] = []
+            from src.state.state import ActionType as _AT
+            _valid_at = {m.value for m in _AT}
+            for opt in regen_options_raw:
+                try:
+                    risk_level = (opt.get("risk_level") or "medium").lower()
+                    if has_safety_blocks and risk_level == "high":
+                        opt = {**opt, "blocked_by_safety": True, "recommended": False}
+                    else:
+                        opt = {**opt, "blocked_by_safety": opt.get("blocked_by_safety", False)}
+                    raw_action = (opt.get("action_type") or "unknown").strip().lower()
+                    opt["action_type"] = raw_action if raw_action in _valid_at else "unknown"
+                    for lf in ("preconditions", "risks_or_tradeoffs", "source_reference_ids", "safety_notes"):
+                        v = opt.get(lf)
+                        opt[lf] = [] if v is None else ([v] if isinstance(v, str) and v.strip() else (v if isinstance(v, list) else []))
+                    regen_validated.append(DecisionOption(**opt).model_dump())
+                except Exception:
+                    pass
+
+            if regen_validated:
+                regen_ok, regen_violations = _validate_safety(
+                    regen_validated,
+                    incident_card,
+                    float(risk_score),
+                    escalation_state,
+                    safety_blocks,
+                )
+                if regen_ok:
+                    validated_options = regen_validated
+                    result.update({k: v for k, v in regen_result.items() if k != "options"})
+                    logger.info("Safety policy: regenerated options passed validation.")
+                else:
+                    logger.error(
+                        "Safety policy: regenerated options still invalid (%d violations). "
+                        "Switching to safe fallback brief.",
+                        len(regen_violations),
+                    )
+                    fallback = build_safe_fallback_brief(asset_id, incident_card, float(risk_score))
+                    fallback_brief_dict = {
+                        "incident_id": incident_card.get("incident_id", "unknown"),
+                        **fallback,
+                    }
+                    out: dict = {
+                        "decision_brief": fallback_brief_dict,
+                        "status": "BRIEF_GENERATED",
+                        "current_node": "decision_brief",
+                        "diagnosis_end_time": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                        "mttd_seconds": 0.0,
+                        "questions": [],
+                    }
+                    if _brief_trace:
+                        out["brief_reference_trace"] = _brief_trace
+                    return out
+            else:
+                logger.error(
+                    "Safety policy: regen produced no valid options. Using safe fallback."
+                )
+                fallback = build_safe_fallback_brief(asset_id, incident_card, float(risk_score))
+                fallback_brief_dict = {
+                    "incident_id": incident_card.get("incident_id", "unknown"),
+                    **fallback,
+                }
+                out = {
+                    "decision_brief": fallback_brief_dict,
+                    "status": "BRIEF_GENERATED",
+                    "current_node": "decision_brief",
+                    "diagnosis_end_time": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                    "mttd_seconds": 0.0,
+                    "questions": [],
+                }
+                if _brief_trace:
+                    out["brief_reference_trace"] = _brief_trace
+                return out
+    except Exception as _sp_err:
+        logger.warning("Safety policy check error (non-fatal): %s", _sp_err)
 
     def _ensure_three_options(options: list[dict]) -> list[dict]:
         """
@@ -479,7 +638,7 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
         except Exception as e:
             logger.warning("Failed to calculate MTTD: %s", e, exc_info=True)
 
-    return {
+    out: dict = {
         "decision_brief": brief.model_dump(),
         "status": "BRIEF_GENERATED",
         "current_node": "decision_brief",
@@ -489,3 +648,6 @@ def decision_brief_agent(state: DecisioState) -> DecisioState:
         # last asked question alongside qa_history (brief path skips question_generation).
         "questions": [],
     }
+    if _brief_trace:
+        out["brief_reference_trace"] = _brief_trace
+    return out
