@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import {
     getDashboard, listUsers, createUser, updateUser, deleteUser,
     listEquipment, listSafetyRules, getEscalationMatrix, listIncidentReports,
@@ -11,6 +11,9 @@ import {
     changePassword, getKpiStats, getEscalationSessions,
     getAdminNotifications, markNotificationRead, markAllNotificationsRead,
     listKnowledgeEntries, createKnowledgeEntry, deleteKnowledgeEntry,
+    listReferenceSources, getReferenceSource, createTextReferenceSource,
+    uploadReferenceSources, updateReferenceSource, updateReferenceScope,
+    reuploadReferenceSource, deleteReferenceSource,
 } from '../services/api'
 import EscalationChat from '../components/EscalationChat'
 import LanguageToggle from '../components/LanguageToggle'
@@ -26,7 +29,7 @@ function getSections(t) {
         { id: 'escalation', label: t('adminPage.sidebar.sections.escalation'), icon: '📈' },
         { id: 'live', label: t('adminPage.sidebar.sections.live'), icon: '💬' },
         { id: 'reports', label: t('adminPage.sidebar.sections.reports'), icon: '📋' },
-        { id: 'knowledge', label: 'Knowledge Base', icon: '🧠' },
+        { id: 'references', label: t('referencesPage.sidebar'), icon: '📚' },
     ]
 }
 
@@ -318,7 +321,7 @@ export default function AdminPortal() {
                 {section === 'escalation' && <EscalationSection />}
                 {section === 'live' && <LiveEscalationsSection />}
                 {section === 'reports' && <ReportsSection />}
-                {section === 'knowledge' && <KnowledgeSection />}
+                {section === 'references' && <ReferencesSection />}
             </main>
 
             {showPwModal && (
@@ -341,10 +344,10 @@ export default function AdminPortal() {
 
 // ── Reusable Modal ─────────────────────────────────────────────────
 
-function Modal({ title, error, children, onClose }) {
+function Modal({ title, error, children, onClose, wide = false }) {
     return (
         <div className="admin-modal-overlay" onClick={onClose}>
-            <div className="admin-modal" onClick={e => e.stopPropagation()}>
+            <div className={`admin-modal${wide ? ' admin-modal--wide' : ''}`} onClick={e => e.stopPropagation()}>
                 <h3>{title}</h3>
                 {error && <div className="form-error" style={{ marginBottom: 16 }}>{error}</div>}
                 {children}
@@ -1807,6 +1810,487 @@ function KnowledgeSection() {
             {confirmDelete && (
                 <Modal title="Delete Knowledge Entry" onClose={() => setConfirmDelete(null)}>
                     <p style={{ marginBottom: 20 }}>Are you sure you want to delete this entry? It will be removed from both the database and the vector store.</p>
+                    <div className="form-actions">
+                        <button className="admin-btn" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                        <button className="admin-btn danger" onClick={handleDelete}>Delete</button>
+                    </div>
+                </Modal>
+            )}
+        </div>
+    )
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// References Section — unified reference_sources library
+// ══════════════════════════════════════════════════════════════════════
+
+const STATUS_LABELS = {
+    processing: 'Processing',
+    active: 'Active',
+    failed: 'Failed',
+    archived: 'Archived',
+}
+
+const SCOPE_LABELS = {
+    company_wide: 'Company-wide',
+    equipment_specific: 'Equipment',
+}
+
+const CATEGORY_LABELS = {
+    manual: 'Manual',
+    document: 'Document',
+    sop: 'SOP',
+    knowledge: 'Knowledge',
+}
+
+function RefBadge({ variant, children, chip = false }) {
+    const classes = ['ref-badge', `ref-badge--${variant}`]
+    if (chip) classes.push('ref-badge--chip')
+    return <span className={classes.join(' ')}>{children}</span>
+}
+
+function StatusBadge({ status }) {
+    const variant = `status-${status in STATUS_LABELS ? status : 'archived'}`
+    return (
+        <RefBadge variant={variant}>
+            {status === 'processing' && <span className="ref-badge-spinner" aria-hidden="true" />}
+            {STATUS_LABELS[status] || status}
+        </RefBadge>
+    )
+}
+
+function ScopeBadge({ scope }) {
+    const variant = scope === 'company_wide' ? 'scope-wide' : 'scope-equip'
+    return <RefBadge variant={variant}>{SCOPE_LABELS[scope] || scope}</RefBadge>
+}
+
+function CategoryBadge({ category }) {
+    return <RefBadge variant="neutral">{CATEGORY_LABELS[category] || category}</RefBadge>
+}
+
+function EquipmentPicker({ equipmentList, selectedIds, onToggle }) {
+    return (
+        <div className="ref-equipment-list">
+            {equipmentList.map(eq => (
+                <label key={eq.id} className="ref-equipment-option">
+                    <input
+                        type="checkbox"
+                        checked={selectedIds.includes(eq.id)}
+                        onChange={() => onToggle(eq.id)}
+                    />
+                    <span>{eq.id} — {eq.name}</span>
+                </label>
+            ))}
+        </div>
+    )
+}
+
+function ReferencesSection() {
+    const [refs, setRefs] = useState([])
+    const [equipmentList, setEquipmentList] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState('')
+    const [mode, setMode] = useState(null)  // null | 'text' | 'upload'
+    const [textForm, setTextForm] = useState({ title: '', category: 'knowledge', scope: 'company_wide', problem: '', solution: '', tags: '', equipment_ids: [] })
+    const [uploadForm, setUploadForm] = useState({ files: [], category: 'manual', scope: 'equipment_specific', equipment_ids: [] })
+    const [formError, setFormError] = useState('')
+    const [saving, setSaving] = useState(false)
+    const [confirmDelete, setConfirmDelete] = useState(null)
+    const [scopeEdit, setScopeEdit] = useState(null)  // ref row for scope edit modal
+    const [scopeForm, setScopeForm] = useState({ scope: 'company_wide', equipment_ids: [] })
+    const [expanded, setExpanded] = useState(null)
+    // Filter state
+    const [filterStatus, setFilterStatus] = useState('')
+    const [filterCategory, setFilterCategory] = useState('')
+    const [filterScope, setFilterScope] = useState('')
+
+    const refreshRefs = useCallback((showLoading = true) => {
+        if (showLoading) {
+            setLoading(true)
+            setError('')
+        }
+        return listReferenceSources({
+            status: filterStatus || undefined,
+            category: filterCategory || undefined,
+            scope: filterScope || undefined,
+        })
+            .then(d => {
+                setRefs(d.reference_sources || [])
+                return d
+            })
+            .catch(e => {
+                if (showLoading) setError(e.message)
+            })
+            .finally(() => {
+                if (showLoading) setLoading(false)
+            })
+    }, [filterStatus, filterCategory, filterScope])
+
+    const load = () => { refreshRefs(true) }
+
+    const hasProcessing = refs.some(r => r.status === 'processing')
+
+    useEffect(() => {
+        refreshRefs(true)
+        listEquipment()
+            .then(d => setEquipmentList(d.equipment || []))
+            .catch(() => {})
+    }, [refreshRefs])
+
+    // Poll every 2s while any row is still processing (silent refresh, no table flash)
+    useEffect(() => {
+        if (!hasProcessing) return
+        const id = setInterval(() => refreshRefs(false), 2000)
+        return () => clearInterval(id)
+    }, [hasProcessing, refreshRefs])
+
+    const handleDelete = async () => {
+        if (!confirmDelete) return
+        try {
+            await deleteReferenceSource(confirmDelete)
+            setConfirmDelete(null)
+            load()
+        } catch (e) {
+            setError(e.message)
+            setConfirmDelete(null)
+        }
+    }
+
+    const handleTextSubmit = async (e) => {
+        e.preventDefault()
+        if (!textForm.title.trim()) { setFormError('Title is required.'); return }
+        if (!textForm.problem.trim()) { setFormError('Problem is required.'); return }
+        if (!textForm.solution.trim()) { setFormError('Solution is required.'); return }
+        if (textForm.scope === 'equipment_specific' && textForm.equipment_ids.length === 0) {
+            setFormError('Select at least one equipment for equipment-specific scope.'); return
+        }
+        setSaving(true); setFormError('')
+        try {
+            await createTextReferenceSource({
+                title: textForm.title.trim(),
+                category: textForm.category,
+                scope: textForm.scope,
+                problem: textForm.problem.trim(),
+                solution: textForm.solution.trim(),
+                tags: textForm.tags.split(',').map(t => t.trim()).filter(Boolean),
+                equipment_ids: textForm.scope === 'equipment_specific' ? textForm.equipment_ids : [],
+            })
+            setMode(null)
+            load()
+        } catch (e) { setFormError(e.message) }
+        finally { setSaving(false) }
+    }
+
+    const handleUploadSubmit = async (e) => {
+        e.preventDefault()
+        if (!uploadForm.files.length) { setFormError('Select at least one file.'); return }
+        if (uploadForm.scope === 'equipment_specific' && uploadForm.equipment_ids.length === 0) {
+            setFormError('Select at least one equipment for equipment-specific scope.'); return
+        }
+        setSaving(true); setFormError('')
+        try {
+            await uploadReferenceSources({
+                files: uploadForm.files,
+                category: uploadForm.category,
+                scope: uploadForm.scope,
+                equipmentIds: uploadForm.scope === 'equipment_specific' ? uploadForm.equipment_ids : [],
+            })
+            setMode(null)
+            load()
+        } catch (e) { setFormError(e.message) }
+        finally { setSaving(false) }
+    }
+
+    const handleScopeEdit = async (e) => {
+        e.preventDefault()
+        if (scopeForm.scope === 'equipment_specific' && scopeForm.equipment_ids.length === 0) {
+            setFormError('Select at least one equipment.'); return
+        }
+        setSaving(true); setFormError('')
+        try {
+            await updateReferenceScope(scopeEdit.id, {
+                scope: scopeForm.scope,
+                equipment_ids: scopeForm.scope === 'equipment_specific' ? scopeForm.equipment_ids : [],
+            })
+            setScopeEdit(null)
+            load()
+        } catch (e) { setFormError(e.message) }
+        finally { setSaving(false) }
+    }
+
+    const toggleEquipment = (formKey, setForm, eqId) => {
+        setForm(prev => {
+            const cur = prev[formKey] || []
+            return { ...prev, [formKey]: cur.includes(eqId) ? cur.filter(x => x !== eqId) : [...cur, eqId] }
+        })
+    }
+
+    return (
+        <div className="admin-section">
+            <div className="admin-header-row">
+                <h2 className="admin-title">📚 References</h2>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="admin-btn" onClick={load}>↻ Refresh</button>
+                    <button className="admin-btn" onClick={() => { setMode('text'); setTextForm({ title: '', category: 'knowledge', scope: 'company_wide', problem: '', solution: '', tags: '', equipment_ids: [] }); setFormError('') }}>+ Add Text Knowledge</button>
+                    <button className="admin-btn primary" onClick={() => { setMode('upload'); setUploadForm({ files: [], category: 'manual', scope: 'equipment_specific', equipment_ids: [] }); setFormError('') }}>+ Upload Documents</button>
+                </div>
+            </div>
+
+            {/* Filters */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                <select className="admin-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)} style={{ fontSize: 13 }}>
+                    <option value="">All categories</option>
+                    <option value="manual">Manual</option>
+                    <option value="document">Document</option>
+                    <option value="sop">SOP</option>
+                    <option value="knowledge">Knowledge</option>
+                </select>
+                <select className="admin-select" value={filterScope} onChange={e => setFilterScope(e.target.value)} style={{ fontSize: 13 }}>
+                    <option value="">All scopes</option>
+                    <option value="company_wide">Company-wide</option>
+                    <option value="equipment_specific">Equipment-specific</option>
+                </select>
+                <select className="admin-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ fontSize: 13 }}>
+                    <option value="">All statuses</option>
+                    <option value="active">Active</option>
+                    <option value="processing">Processing</option>
+                    <option value="failed">Failed</option>
+                    <option value="archived">Archived</option>
+                </select>
+            </div>
+
+            {error && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
+
+            {loading ? (
+                <div className="admin-loading">Loading...</div>
+            ) : refs.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-dim)' }}>
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>📚</div>
+                    <p>No reference sources yet. Add a text knowledge entry or upload a document.</p>
+                </div>
+            ) : (
+                <div className="admin-table-wrap">
+                    <table className="admin-table admin-table--references">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th className="col-category">Category</th>
+                                <th className="col-scope">Scope</th>
+                                <th>Linked Equipment</th>
+                                <th className="col-status">Status</th>
+                                <th>Chunks</th>
+                                <th>Created</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {refs.map(ref => (
+                                <Fragment key={ref.id}>
+                                    <tr style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === ref.id ? null : ref.id)}>
+                                        <td>
+                                            <div style={{ fontWeight: 500 }}>{ref.title}</div>
+                                            {ref.source_filename && <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>{ref.source_filename}</div>}
+                                        </td>
+                                        <td className="col-category"><CategoryBadge category={ref.category} /></td>
+                                        <td className="col-scope"><ScopeBadge scope={ref.scope} /></td>
+                                        <td>
+                                            {ref.equipment_links && ref.equipment_links.length > 0 ? (
+                                                <div className="ref-equipment-chips">
+                                                    {ref.equipment_links.map(l => (
+                                                        <RefBadge key={l.equipment_id} variant="neutral" chip>{l.equipment_id}</RefBadge>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>—</span>
+                                            )}
+                                        </td>
+                                        <td className="col-status"><StatusBadge status={ref.status} /></td>
+                                        <td style={{ textAlign: 'right' }}>{ref.chunk_count}</td>
+                                        <td style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>{ref.created_at ? ref.created_at.slice(0, 10) : '—'}</td>
+                                        <td>
+                                            <div style={{ display: 'flex', gap: 6, flexWrap: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                                                <button className="admin-btn" style={{ fontSize: 11, padding: '3px 8px' }}
+                                                    onClick={() => {
+                                                        setScopeEdit(ref)
+                                                        setScopeForm({ scope: ref.scope, equipment_ids: (ref.equipment_links || []).map(l => l.equipment_id) })
+                                                        setFormError('')
+                                                    }}>
+                                                    Scope
+                                                </button>
+                                                <button className="admin-btn danger" style={{ fontSize: 11, padding: '3px 8px' }}
+                                                    onClick={() => setConfirmDelete(ref.id)}>
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {expanded === ref.id && (
+                                        <tr>
+                                            <td colSpan={8} style={{ background: 'var(--bg-soft)', padding: '12px 16px' }}>
+                                                {ref.source_type === 'text' && (
+                                                    <div>
+                                                        <div style={{ marginBottom: 6 }}><strong>Problem:</strong> {ref.problem}</div>
+                                                        <div><strong>Solution:</strong> {ref.solution}</div>
+                                                        {ref.tags && ref.tags.length > 0 && <div style={{ marginTop: 6 }}><strong>Tags:</strong> {ref.tags.join(', ')}</div>}
+                                                    </div>
+                                                )}
+                                                {ref.status === 'failed' && ref.processing_error && (
+                                                    <div style={{ marginTop: 8, color: '#dc2626', fontSize: 12 }}>
+                                                        <strong>Error:</strong> {ref.processing_error}
+                                                    </div>
+                                                )}
+                                                {ref.content_hash && (
+                                                    <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-dim)' }}>Hash: {ref.content_hash.slice(0, 16)}…</div>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    )}
+                                </Fragment>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            {/* Add Text Knowledge modal */}
+            {mode === 'text' && (
+                <Modal title="Add Text Knowledge" error={formError} onClose={() => setMode(null)}>
+                    <form onSubmit={handleTextSubmit}>
+                        <div className="form-group">
+                            <label>Title *</label>
+                            <input value={textForm.title} onChange={e => setTextForm({ ...textForm, title: e.target.value })} placeholder="Short descriptive title" required />
+                        </div>
+                        <div className="form-group">
+                            <label>Category</label>
+                            <select value={textForm.category} onChange={e => setTextForm({ ...textForm, category: e.target.value })} className="admin-select">
+                                <option value="knowledge">Knowledge</option>
+                                <option value="sop">SOP</option>
+                                <option value="document">Document</option>
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label>Scope</label>
+                            <select value={textForm.scope} onChange={e => setTextForm({ ...textForm, scope: e.target.value, equipment_ids: [] })} className="admin-select">
+                                <option value="company_wide">Company-wide</option>
+                                <option value="equipment_specific">Equipment-specific</option>
+                            </select>
+                        </div>
+                        {textForm.scope === 'equipment_specific' && (
+                            <div className="form-group">
+                                <label>Link to Equipment (select one or more)</label>
+                                <EquipmentPicker
+                                    equipmentList={equipmentList}
+                                    selectedIds={textForm.equipment_ids}
+                                    onToggle={(id) => toggleEquipment('equipment_ids', setTextForm, id)}
+                                />
+                            </div>
+                        )}
+                        <div className="form-group">
+                            <label>Problem *</label>
+                            <textarea rows={3} value={textForm.problem} onChange={e => setTextForm({ ...textForm, problem: e.target.value })} placeholder="Describe the problem or symptom..." style={{ width: '100%', resize: 'vertical' }} required />
+                        </div>
+                        <div className="form-group">
+                            <label>Solution *</label>
+                            <textarea rows={3} value={textForm.solution} onChange={e => setTextForm({ ...textForm, solution: e.target.value })} placeholder="Describe the solution or resolution..." style={{ width: '100%', resize: 'vertical' }} required />
+                        </div>
+                        <div className="form-group">
+                            <label>Tags <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>(comma-separated, optional)</span></label>
+                            <input value={textForm.tags} onChange={e => setTextForm({ ...textForm, tags: e.target.value })} placeholder="e.g. pump, pressure, mechanical" />
+                        </div>
+                        <div className="form-actions">
+                            <button type="button" className="admin-btn" onClick={() => setMode(null)}>Cancel</button>
+                            <button type="submit" className="admin-btn primary" disabled={saving}>{saving ? 'Saving…' : 'Add Entry'}</button>
+                        </div>
+                    </form>
+                </Modal>
+            )}
+
+            {/* Upload Documents modal */}
+            {mode === 'upload' && (
+                <Modal title="Upload Documents" error={formError} onClose={() => setMode(null)} wide>
+                    <form onSubmit={handleUploadSubmit}>
+                        <div className="form-group">
+                            <label>Files (.pdf, .docx, .txt) — up to 10 files</label>
+                            <input
+                                type="file"
+                                multiple
+                                accept=".pdf,.docx,.txt"
+                                onChange={e => setUploadForm({ ...uploadForm, files: Array.from(e.target.files) })}
+                            />
+                            {uploadForm.files.length > 0 && (
+                                <ul className="ref-file-list">
+                                    {uploadForm.files.map((f, i) => (
+                                        <li key={`${f.name}-${i}`}>{f.name}</li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                        <div className="form-group">
+                            <label>Category</label>
+                            <select value={uploadForm.category} onChange={e => setUploadForm({ ...uploadForm, category: e.target.value })} className="admin-select">
+                                <option value="manual">Manual</option>
+                                <option value="document">Document</option>
+                                <option value="sop">SOP</option>
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label>Scope</label>
+                            <select value={uploadForm.scope} onChange={e => setUploadForm({ ...uploadForm, scope: e.target.value, equipment_ids: [] })} className="admin-select">
+                                <option value="company_wide">Company-wide</option>
+                                <option value="equipment_specific">Equipment-specific</option>
+                            </select>
+                        </div>
+                        {uploadForm.scope === 'equipment_specific' && (
+                            <div className="form-group">
+                                <label>Link to Equipment (select one or more)</label>
+                                <EquipmentPicker
+                                    equipmentList={equipmentList}
+                                    selectedIds={uploadForm.equipment_ids}
+                                    onToggle={(id) => toggleEquipment('equipment_ids', setUploadForm, id)}
+                                />
+                            </div>
+                        )}
+                        <div className="form-actions">
+                            <button type="button" className="admin-btn" onClick={() => setMode(null)}>Cancel</button>
+                            <button type="submit" className="admin-btn primary" disabled={saving}>{saving ? 'Uploading…' : 'Upload'}</button>
+                        </div>
+                    </form>
+                </Modal>
+            )}
+
+            {/* Scope / equipment links edit modal */}
+            {scopeEdit && (
+                <Modal title={`Edit Scope: ${scopeEdit.title}`} error={formError} onClose={() => setScopeEdit(null)} wide>
+                    <form onSubmit={handleScopeEdit}>
+                        <div className="form-group">
+                            <label>Scope</label>
+                            <select value={scopeForm.scope} onChange={e => setScopeForm({ ...scopeForm, scope: e.target.value, equipment_ids: [] })} className="admin-select">
+                                <option value="company_wide">Company-wide</option>
+                                <option value="equipment_specific">Equipment-specific</option>
+                            </select>
+                        </div>
+                        {scopeForm.scope === 'equipment_specific' && (
+                            <div className="form-group">
+                                <label>Link to Equipment</label>
+                                <EquipmentPicker
+                                    equipmentList={equipmentList}
+                                    selectedIds={scopeForm.equipment_ids}
+                                    onToggle={(id) => toggleEquipment('equipment_ids', setScopeForm, id)}
+                                />
+                            </div>
+                        )}
+                        <div className="form-actions">
+                            <button type="button" className="admin-btn" onClick={() => setScopeEdit(null)}>Cancel</button>
+                            <button type="submit" className="admin-btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save Scope'}</button>
+                        </div>
+                    </form>
+                </Modal>
+            )}
+
+            {/* Confirm delete */}
+            {confirmDelete && (
+                <Modal title="Delete Reference Source" onClose={() => setConfirmDelete(null)}>
+                    <p style={{ marginBottom: 20 }}>Delete this reference source? All vectors will be removed from the knowledge store.</p>
                     <div className="form-actions">
                         <button className="admin-btn" onClick={() => setConfirmDelete(null)}>Cancel</button>
                         <button className="admin-btn danger" onClick={handleDelete}>Delete</button>

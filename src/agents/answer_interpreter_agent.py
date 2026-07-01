@@ -139,7 +139,11 @@ def answer_interpreter_agent(state: DecisioState) -> DecisioState:
     )
 
     updated_qa_history = list(qa_history)
-    updated_qa_history.append(qa_pair.model_dump())
+    qa_entry = qa_pair.model_dump()
+    ref_trace = state.get("question_reference_trace")
+    if ref_trace and ref_trace.get("retrieved_hits"):
+        qa_entry["reference_trace"] = ref_trace
+    updated_qa_history.append(qa_entry)
 
     # Track contradictions
     existing_contradictions = state.get("contradictions") or []

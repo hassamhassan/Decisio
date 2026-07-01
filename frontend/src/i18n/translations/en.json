@@ -538,5 +538,59 @@
         "newPassword": "New Password (leave blank to keep current)"
       }
     }
+  },
+  "referencesPage": {
+    "title": "References",
+    "sidebar": "References",
+    "empty": "No reference sources yet. Add a text knowledge entry or upload a document.",
+    "addText": "+ Add Text Knowledge",
+    "uploadDocs": "+ Upload Documents",
+    "table": {
+      "title": "Title",
+      "type": "Type",
+      "category": "Category",
+      "scope": "Scope",
+      "status": "Status",
+      "chunks": "Chunks",
+      "equipment": "Linked Equipment",
+      "created": "Created",
+      "actions": "Actions"
+    },
+    "scope": {
+      "company_wide": "Company-wide",
+      "equipment_specific": "Equipment-specific"
+    },
+    "status": {
+      "processing": "Processing",
+      "active": "Active",
+      "failed": "Failed",
+      "archived": "Archived"
+    },
+    "category": {
+      "manual": "Manual",
+      "document": "Document",
+      "sop": "SOP",
+      "knowledge": "Knowledge"
+    },
+    "form": {
+      "titleLabel": "Title",
+      "categoryLabel": "Category",
+      "scopeLabel": "Scope",
+      "problemLabel": "Problem",
+      "solutionLabel": "Solution",
+      "tagsLabel": "Tags (comma-separated)",
+      "equipmentLabel": "Link to Equipment",
+      "filesLabel": "Files (.pdf, .docx, .txt)",
+      "submitText": "Add Text Entry",
+      "uploadSubmit": "Upload",
+      "cancel": "Cancel"
+    },
+    "errors": {
+      "titleRequired": "Title is required.",
+      "problemRequired": "Problem description is required.",
+      "solutionRequired": "Solution is required.",
+      "filesRequired": "Please select at least one file.",
+      "equipmentRequired": "Select at least one equipment for equipment-specific scope."
+    }
   }
 }

@@ -16,12 +16,13 @@ import traceback
 import re
 import math
 from datetime import datetime,timezone
-from typing import Optional
+from typing import Optional, List
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI,HTTPException,Depends,UploadFile,File
+from fastapi import FastAPI,HTTPException,Depends,UploadFile,File,Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel,Field
 
 from dotenv import load_dotenv
@@ -298,6 +299,11 @@ class IncidentResponse(BaseModel):
     mttd_seconds: Optional[float] = None
     verification_confirmed: Optional[bool] = False
     clarification_question: Optional[str] = None
+    question_reference_trace: Optional[dict] = None
+    brief_reference_trace: Optional[dict] = None
+    reference_code_answer: Optional[str] = None
+    reference_code_trace: Optional[dict] = None
+    reference_code_lookup_complete: Optional[bool] = None
 
 
 async def _safe_background(coro) -> None:
@@ -512,6 +518,11 @@ def _state_to_response(state: dict) -> IncidentResponse:
         mttd_seconds=state.get("mttd_seconds"),
         verification_confirmed=state.get("verification_confirmed") or False,
         clarification_question=state.get("clarification_question"),
+        question_reference_trace=state.get("question_reference_trace"),
+        brief_reference_trace=state.get("brief_reference_trace"),
+        reference_code_answer=state.get("reference_code_answer"),
+        reference_code_trace=state.get("reference_code_trace"),
+        reference_code_lookup_complete=state.get("reference_code_lookup_complete"),
     )
 
 
@@ -1087,6 +1098,7 @@ from sqlalchemy.exc import IntegrityError
 from src.db.models import (
     AdminNotification,Incident,Equipment,SafetyRule,EscalationLevel,EscalationRule,
     IncidentReport,Company,EscalationSession,EscalationMessage,KnowledgeEntry,
+    ReferenceSource,ReferenceEquipmentLink,
 )
 
 
@@ -1934,6 +1946,698 @@ async def delete_knowledge_entry(entry_id: str, admin: TokenData = Depends(requi
         await session.flush()
 
     return {"message": "Knowledge entry deleted."}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Reference Sources — unified document / KB library
+# ══════════════════════════════════════════════════════════════════════
+
+ALLOWED_REFERENCE_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt"}
+MAX_REFERENCE_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+VALID_SCOPES = {"company_wide", "equipment_specific"}
+VALID_CATEGORIES = {"manual", "document", "sop", "knowledge"}
+MAX_FILES_PER_UPLOAD = 10
+
+
+class ReferenceTextCreate(BaseModel):
+    title: str
+    category: str = "knowledge"
+    scope: str = "company_wide"
+    problem: str
+    solution: str
+    tags: Optional[List[str]] = None
+    equipment_ids: Optional[List[str]] = None
+
+
+class ReferenceMetaUpdate(BaseModel):
+    title: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+    problem: Optional[str] = None
+    solution: Optional[str] = None
+    status: Optional[str] = None   # archived | active
+
+
+class ReferenceScopeUpdate(BaseModel):
+    scope: str
+    equipment_ids: Optional[List[str]] = None
+
+
+class ReferenceDebugRequest(BaseModel):
+    equipment_id: str
+    query: str
+    limit: int = 5
+
+
+def _ref_to_dict(r: ReferenceSource) -> dict:
+    return {
+        "id": str(r.id),
+        "company_id": r.company_id,
+        "title": r.title,
+        "source_type": r.source_type,
+        "category": r.category,
+        "scope": r.scope,
+        "problem": r.problem,
+        "solution": r.solution,
+        "tags": r.tags or [],
+        "source_filename": r.source_filename,
+        "content_hash": r.content_hash,
+        "status": r.status,
+        "processing_error": r.processing_error,
+        "chunk_count": r.chunk_count,
+        "equipment_links": [
+            {"equipment_id": lnk.equipment_id}
+            for lnk in (r.equipment_links or [])
+        ],
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+    }
+
+
+async def _validate_equipment_ids(
+    equipment_ids: list[str],
+    company_id: int,
+    session,
+) -> list[str]:
+    """Upper-case + verify each equipment ID belongs to this company. Returns cleaned list."""
+    ids = [e.strip().upper() for e in equipment_ids if e.strip()]
+    if not ids:
+        return ids
+    result = await session.execute(
+        sa_select(Equipment.id).where(
+            Equipment.company_id == company_id,
+            Equipment.id.in_(ids),
+        )
+    )
+    found = {r for r in result.scalars().all()}
+    missing = [i for i in ids if i not in found]
+    if missing:
+        raise HTTPException(400, f"Equipment IDs not found for this company: {', '.join(missing)}")
+    return ids
+
+
+async def _set_equipment_links(ref_id, company_id: int, equipment_ids: list[str], session) -> None:
+    """Replace all equipment links for a reference source atomically."""
+    from sqlalchemy import delete as sa_delete
+    await session.execute(
+        sa_delete(ReferenceEquipmentLink).where(
+            ReferenceEquipmentLink.reference_source_id == ref_id
+        )
+    )
+    for eq_id in equipment_ids:
+        session.add(ReferenceEquipmentLink(
+            reference_source_id=ref_id,
+            equipment_id=eq_id.upper(),
+            company_id=company_id,
+        ))
+
+
+async def _replace_equipment_links(ref_id, company_id: int, equipment_ids: list[str], session) -> None:
+    from sqlalchemy import delete as sa_delete
+    await session.execute(
+        sa_delete(ReferenceEquipmentLink).where(
+            ReferenceEquipmentLink.reference_source_id == ref_id
+        )
+    )
+    for eq_id in equipment_ids:
+        session.add(ReferenceEquipmentLink(
+            reference_source_id=ref_id,
+            equipment_id=eq_id.upper(),
+            company_id=company_id,
+        ))
+
+
+async def _run_ref_ingest(ref_id: str, company_id: int, source_type: str, title: str,
+                          category: str, content: bytes | None = None,
+                          source_filename: str = "", problem: str = "", solution: str = ""):
+    """Background async wrapper that calls the sync ingest worker then updates PG status."""
+    import asyncio
+    from src.services.reference_service import process_file_ingest, process_text_ingest
+
+    async def _do():
+        try:
+            if source_type == "file":
+                chunk_count = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: process_file_ingest(
+                        reference_source_id=ref_id,
+                        company_id=company_id,
+                        title=title,
+                        category=category,
+                        source_filename=source_filename,
+                        content=content,
+                    ),
+                )
+            else:
+                chunk_count = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: process_text_ingest(
+                        reference_source_id=ref_id,
+                        company_id=company_id,
+                        title=title,
+                        category=category,
+                        problem=problem,
+                        solution=solution,
+                    ),
+                )
+            async with get_session() as session:
+                row = await session.get(ReferenceSource, uuid.UUID(ref_id))
+                if row:
+                    row.status = "active"
+                    row.chunk_count = chunk_count
+                    row.processing_error = None
+                    await session.flush()
+        except Exception as exc:
+            logger.warning("Reference ingest failed ref=%s: %s", ref_id, exc)
+            try:
+                async with get_session() as session:
+                    row = await session.get(ReferenceSource, uuid.UUID(ref_id))
+                    if row:
+                        row.status = "failed"
+                        row.chunk_count = 0
+                        row.processing_error = str(exc)[:2000]
+                        await session.flush()
+            except Exception as inner:
+                logger.error("Could not persist ingest failure: %s", inner)
+
+    asyncio.create_task(_do())
+
+
+# ── List ──────────────────────────────────────────────────────────────
+
+@app.get("/api/admin/reference-sources")
+async def list_reference_sources(
+    equipment_id: Optional[str] = None,
+    category: Optional[str] = None,
+    status: Optional[str] = None,
+    scope: Optional[str] = None,
+    admin: TokenData = Depends(require_company_admin),
+):
+    """List reference sources for this company (tenant-scoped, filterable)."""
+    async with get_session() as session:
+        from sqlalchemy.orm import selectinload
+        q = (
+            sa_select(ReferenceSource)
+            .options(selectinload(ReferenceSource.equipment_links))
+            .where(ReferenceSource.company_id == admin.company_id)
+        )
+        if category:
+            q = q.where(ReferenceSource.category == category.lower())
+        if status:
+            q = q.where(ReferenceSource.status == status.lower())
+        if scope:
+            q = q.where(ReferenceSource.scope == scope.lower())
+        if equipment_id:
+            eq_upper = equipment_id.strip().upper()
+            from sqlalchemy import exists
+            q = q.where(
+                sa_or(
+                    ReferenceSource.scope == "company_wide",
+                    exists(
+                        sa_select(ReferenceEquipmentLink.id).where(
+                            ReferenceEquipmentLink.reference_source_id == ReferenceSource.id,
+                            ReferenceEquipmentLink.equipment_id == eq_upper,
+                        )
+                    ),
+                )
+            )
+        q = q.order_by(ReferenceSource.created_at.desc())
+        rows = (await session.execute(q)).scalars().all()
+        return {"reference_sources": [_ref_to_dict(r) for r in rows]}
+
+
+# ── Create text source ────────────────────────────────────────────────
+
+@app.post("/api/admin/reference-sources/text", status_code=202)
+async def create_text_reference_source(
+    req: ReferenceTextCreate,
+    admin: TokenData = Depends(require_company_admin),
+):
+    """Create a text KB reference source and trigger async embedding."""
+    if not req.problem.strip():
+        raise HTTPException(400, "problem is required.")
+    if not req.solution.strip():
+        raise HTTPException(400, "solution is required.")
+    if req.scope not in VALID_SCOPES:
+        raise HTTPException(400, f"scope must be one of {sorted(VALID_SCOPES)}")
+    if req.category.lower() not in VALID_CATEGORIES:
+        raise HTTPException(400, f"category must be one of {sorted(VALID_CATEGORIES)}")
+
+    eq_ids: list[str] = []
+    if req.scope == "equipment_specific":
+        if not req.equipment_ids:
+            raise HTTPException(400, "equipment_ids required when scope=equipment_specific")
+        async with get_session() as session:
+            eq_ids = await _validate_equipment_ids(req.equipment_ids, admin.company_id, session)
+    elif req.equipment_ids:
+        raise HTTPException(400, "equipment_ids must be empty when scope=company_wide")
+
+    from src.services.reference_service import compute_text_hash
+    content_hash = compute_text_hash(req.problem.strip(), req.solution.strip())
+
+    ref_id = uuid.uuid4()
+    async with get_session() as session:
+        row = ReferenceSource(
+            id=ref_id,
+            company_id=admin.company_id,
+            title=req.title.strip(),
+            source_type="text",
+            category=req.category.lower(),
+            scope=req.scope,
+            problem=req.problem.strip(),
+            solution=req.solution.strip(),
+            tags=req.tags or [],
+            content_hash=content_hash,
+            status="processing",
+            created_by=admin.user_id,
+        )
+        session.add(row)
+        await session.flush()
+        for eq_id in eq_ids:
+            session.add(ReferenceEquipmentLink(
+                reference_source_id=ref_id,
+                equipment_id=eq_id,
+                company_id=admin.company_id,
+            ))
+        await session.flush()
+
+    await _run_ref_ingest(
+        ref_id=str(ref_id),
+        company_id=admin.company_id,
+        source_type="text",
+        title=req.title.strip(),
+        category=req.category.lower(),
+        problem=req.problem.strip(),
+        solution=req.solution.strip(),
+    )
+
+    return {"id": str(ref_id), "status": "processing"}
+
+
+# ── Multi-file upload ─────────────────────────────────────────────────
+
+@app.post("/api/admin/reference-sources/upload", status_code=202)
+async def upload_reference_sources(
+    files: List[UploadFile] = File(...),
+    category: str = Form("manual"),
+    scope: str = Form("equipment_specific"),
+    equipment_ids: str = Form(""),   # comma-separated
+    admin: TokenData = Depends(require_company_admin),
+):
+    """Upload one or more files as reference sources (async processing).
+
+    Returns a list of { id, filename, status } entries immediately.
+    Use GET /api/admin/reference-sources/{id} to poll status.
+    """
+    if len(files) > MAX_FILES_PER_UPLOAD:
+        raise HTTPException(400, f"Maximum {MAX_FILES_PER_UPLOAD} files per upload.")
+    if scope not in VALID_SCOPES:
+        raise HTTPException(400, f"scope must be one of {sorted(VALID_SCOPES)}")
+    if category.lower() not in VALID_CATEGORIES:
+        raise HTTPException(400, f"category must be one of {sorted(VALID_CATEGORIES)}")
+
+    eq_id_list: list[str] = []
+    if scope == "equipment_specific":
+        raw_ids = [e.strip() for e in equipment_ids.split(",") if e.strip()]
+        if not raw_ids:
+            raise HTTPException(400, "equipment_ids required when scope=equipment_specific")
+        async with get_session() as session:
+            eq_id_list = await _validate_equipment_ids(raw_ids, admin.company_id, session)
+    elif equipment_ids.strip():
+        raise HTTPException(400, "equipment_ids must be empty when scope=company_wide")
+
+    from src.services.reference_service import compute_file_hash
+
+    results = []
+    for upload in files:
+        filename = upload.filename or "upload"
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in ALLOWED_REFERENCE_EXTENSIONS:
+            results.append({
+                "filename": filename,
+                "status": "failed",
+                "error": f"Unsupported file type '{ext}'.",
+            })
+            continue
+
+        content = await upload.read()
+        if len(content) > MAX_REFERENCE_FILE_BYTES:
+            results.append({
+                "filename": filename,
+                "status": "failed",
+                "error": "File exceeds 10 MB limit.",
+            })
+            continue
+
+        content_hash = compute_file_hash(content)
+        title = os.path.splitext(filename)[0].replace("_", " ").replace("-", " ")
+        ref_id = uuid.uuid4()
+
+        async with get_session() as session:
+            row = ReferenceSource(
+                id=ref_id,
+                company_id=admin.company_id,
+                title=title,
+                source_type="file",
+                category=category.lower(),
+                scope=scope,
+                source_filename=filename,
+                content_hash=content_hash,
+                status="processing",
+                created_by=admin.user_id,
+            )
+            session.add(row)
+            await session.flush()
+            for eq_id in eq_id_list:
+                session.add(ReferenceEquipmentLink(
+                    reference_source_id=ref_id,
+                    equipment_id=eq_id,
+                    company_id=admin.company_id,
+                ))
+            await session.flush()
+
+        await _run_ref_ingest(
+            ref_id=str(ref_id),
+            company_id=admin.company_id,
+            source_type="file",
+            title=title,
+            category=category.lower(),
+            content=content,
+            source_filename=filename,
+        )
+
+        results.append({"id": str(ref_id), "filename": filename, "status": "processing"})
+
+    return {"uploaded": results}
+
+
+# ── Get detail ────────────────────────────────────────────────────────
+
+@app.get("/api/admin/reference-sources/{ref_id}")
+async def get_reference_source(
+    ref_id: str,
+    admin: TokenData = Depends(require_company_admin),
+):
+    async with get_session() as session:
+        from sqlalchemy.orm import selectinload
+        row = (await session.execute(
+            sa_select(ReferenceSource)
+            .options(selectinload(ReferenceSource.equipment_links))
+            .where(
+                ReferenceSource.id == uuid.UUID(ref_id),
+                ReferenceSource.company_id == admin.company_id,
+            )
+        )).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "Reference source not found.")
+        return _ref_to_dict(row)
+
+
+# ── Update metadata ───────────────────────────────────────────────────
+
+@app.put("/api/admin/reference-sources/{ref_id}")
+async def update_reference_source(
+    ref_id: str,
+    req: ReferenceMetaUpdate,
+    admin: TokenData = Depends(require_company_admin),
+):
+    """Update title, category, tags, or archived status.
+    If problem/solution changed on a text source, re-embeds asynchronously.
+    """
+    async with get_session() as session:
+        from sqlalchemy.orm import selectinload
+        row = (await session.execute(
+            sa_select(ReferenceSource)
+            .options(selectinload(ReferenceSource.equipment_links))
+            .where(
+                ReferenceSource.id == uuid.UUID(ref_id),
+                ReferenceSource.company_id == admin.company_id,
+            )
+        )).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "Reference source not found.")
+
+        if req.title is not None:
+            row.title = req.title.strip()
+        if req.category is not None:
+            if req.category.lower() not in VALID_CATEGORIES:
+                raise HTTPException(400, f"category must be one of {sorted(VALID_CATEGORIES)}")
+            row.category = req.category.lower()
+        if req.tags is not None:
+            row.tags = req.tags
+        if req.status is not None:
+            if req.status not in ("active", "archived"):
+                raise HTTPException(400, "status must be 'active' or 'archived'")
+            row.status = req.status
+
+        re_embed = False
+        if row.source_type == "text":
+            from src.services.reference_service import compute_text_hash
+            new_problem = req.problem.strip() if req.problem is not None else (row.problem or "")
+            new_solution = req.solution.strip() if req.solution is not None else (row.solution or "")
+            new_hash = compute_text_hash(new_problem, new_solution)
+            if new_hash != row.content_hash:
+                row.problem = new_problem
+                row.solution = new_solution
+                row.content_hash = new_hash
+                row.status = "processing"
+                row.processing_error = None
+                re_embed = True
+
+        await session.flush()
+        row_id = str(row.id)
+        row_title = row.title
+        row_category = row.category
+        row_problem = row.problem or ""
+        row_solution = row.solution or ""
+
+    if re_embed:
+        await _run_ref_ingest(
+            ref_id=row_id, company_id=admin.company_id,
+            source_type="text", title=row_title, category=row_category,
+            problem=row_problem, solution=row_solution,
+        )
+
+    return {"message": "Updated.", "id": row_id, "re_embedding": re_embed}
+
+
+# ── Re-upload file source ─────────────────────────────────────────────
+
+@app.post("/api/admin/reference-sources/{ref_id}/reupload", status_code=202)
+async def reupload_reference_source(
+    ref_id: str,
+    file: UploadFile = File(...),
+    admin: TokenData = Depends(require_company_admin),
+):
+    """Replace the file content of an existing file reference source."""
+    async with get_session() as session:
+        row = (await session.execute(
+            sa_select(ReferenceSource).where(
+                ReferenceSource.id == uuid.UUID(ref_id),
+                ReferenceSource.company_id == admin.company_id,
+                ReferenceSource.source_type == "file",
+            )
+        )).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "File reference source not found.")
+
+        filename = file.filename or row.source_filename or "upload"
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in ALLOWED_REFERENCE_EXTENSIONS:
+            raise HTTPException(400, f"Unsupported file type '{ext}'.")
+
+        content = await file.read()
+        if len(content) > MAX_REFERENCE_FILE_BYTES:
+            raise HTTPException(413, "File exceeds 10 MB limit.")
+
+        from src.services.reference_service import compute_file_hash
+        new_hash = compute_file_hash(content)
+        if new_hash == row.content_hash and row.status == "active":
+            return {"message": "Content unchanged — no re-processing needed.", "id": ref_id}
+
+        row.source_filename = filename
+        row.content_hash = new_hash
+        row.status = "processing"
+        row.processing_error = None
+        await session.flush()
+
+    async with get_session() as session:
+        _row = (await session.execute(
+            sa_select(ReferenceSource).where(ReferenceSource.id == uuid.UUID(ref_id))
+        )).scalar_one_or_none()
+        _title = _row.title if _row else ""
+        _category = _row.category if _row else "manual"
+
+    await _run_ref_ingest(
+        ref_id=ref_id, company_id=admin.company_id,
+        source_type="file", title=_title, category=_category,
+        content=content, source_filename=filename,
+    )
+    return {"id": ref_id, "status": "processing"}
+
+
+# ── Scope + equipment links ───────────────────────────────────────────
+
+@app.put("/api/admin/reference-sources/{ref_id}/scope")
+async def update_reference_scope(
+    ref_id: str,
+    req: ReferenceScopeUpdate,
+    admin: TokenData = Depends(require_company_admin),
+):
+    """Atomically update scope and replace equipment links."""
+    if req.scope not in VALID_SCOPES:
+        raise HTTPException(400, f"scope must be one of {sorted(VALID_SCOPES)}")
+
+    eq_ids: list[str] = []
+    if req.scope == "equipment_specific":
+        if not req.equipment_ids:
+            raise HTTPException(400, "equipment_ids required when scope=equipment_specific")
+        async with get_session() as session:
+            eq_ids = await _validate_equipment_ids(req.equipment_ids, admin.company_id, session)
+    elif req.equipment_ids:
+        raise HTTPException(400, "equipment_ids must be empty when scope=company_wide")
+
+    async with get_session() as session:
+        row = (await session.execute(
+            sa_select(ReferenceSource).where(
+                ReferenceSource.id == uuid.UUID(ref_id),
+                ReferenceSource.company_id == admin.company_id,
+            )
+        )).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "Reference source not found.")
+
+        row.scope = req.scope
+        await session.flush()
+        await _replace_equipment_links(row.id, admin.company_id, eq_ids, session)
+        await session.flush()
+
+    return {"message": "Scope updated.", "id": ref_id}
+
+
+# ── Delete ────────────────────────────────────────────────────────────
+
+@app.delete("/api/admin/reference-sources/{ref_id}")
+async def delete_reference_source(
+    ref_id: str,
+    admin: TokenData = Depends(require_company_admin),
+):
+    """Delete a reference source from PG and remove its Qdrant vectors."""
+    async with get_session() as session:
+        row = (await session.execute(
+            sa_select(ReferenceSource).where(
+                ReferenceSource.id == uuid.UUID(ref_id),
+                ReferenceSource.company_id == admin.company_id,
+            )
+        )).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "Reference source not found.")
+        await session.delete(row)
+        await session.flush()
+
+    try:
+        import asyncio
+        from src.services.reference_service import delete_source_vectors
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: delete_source_vectors(ref_id, admin.company_id),
+        )
+    except Exception as e:
+        logger.warning("Qdrant cleanup failed for ref=%s: %s", ref_id, e)
+
+    return {"message": "Reference source deleted."}
+
+
+# ── Legacy shims ──────────────────────────────────────────────────────
+# The existing /api/admin/equipment/{id}/manual and /api/admin/knowledge
+# endpoints continue to function unchanged — they call the old services
+# directly.  New uploads / text entries go through /api/admin/reference-sources.
+# Equipment delete: remove only equipment_specific links for that machine.
+
+@app.delete("/api/admin/reference-sources/equipment-links/{equipment_id}")
+async def remove_equipment_reference_links(
+    equipment_id: str,
+    admin: TokenData = Depends(require_company_admin),
+):
+    """Remove all equipment-specific links for a given equipment ID.
+    Called internally when equipment is deleted.
+    Does NOT delete company_wide references.
+    """
+    from sqlalchemy import delete as sa_delete
+    async with get_session() as session:
+        await session.execute(
+            sa_delete(ReferenceEquipmentLink).where(
+                ReferenceEquipmentLink.equipment_id == equipment_id.upper(),
+                ReferenceEquipmentLink.company_id == admin.company_id,
+            )
+        )
+        await session.flush()
+    return {"message": f"Equipment links removed for {equipment_id.upper()}"}
+
+
+@app.post("/api/admin/reference-sources/debug/retrieval")
+async def debug_reference_retrieval(
+    req: ReferenceDebugRequest,
+    admin: TokenData = Depends(require_company_admin),
+):
+    """Admin-only: test scoped Qdrant retrieval without running a full incident.
+
+    Guarded by DECISIO_ENABLE_RETRIEVAL_DEBUG env flag (default: disabled).
+    Uses the exact same scope-resolution and retrieval functions as the agents.
+    Never returns raw embeddings, vectors, or cross-tenant data.
+    """
+    import os as _os
+    if not _os.getenv("DECISIO_ENABLE_RETRIEVAL_DEBUG", "").lower() in ("1", "true", "yes"):
+        from fastapi import HTTPException as _HTTP
+        raise _HTTP(status_code=404, detail="Retrieval debug endpoint is not enabled on this instance.")
+
+    from src.services.reference_service import resolve_source_ids, resolve_source_metadata, retrieve_with_trace
+    from src.db.models import Equipment as _Equipment
+
+    # Validate equipment belongs to this admin's company
+    equipment_id = req.equipment_id.strip().upper()
+    async with get_session() as session:
+        from sqlalchemy import select as _sel
+        eq_row = await session.execute(
+            _sel(_Equipment).where(
+                _Equipment.id == equipment_id,
+                # _Equipment.equipment_id == equipment_id,
+                _Equipment.company_id == admin.company_id,
+            )
+        )
+        if eq_row.scalars().first() is None:
+            from fastapi import HTTPException as _HTTP
+            raise _HTTP(status_code=404, detail=f"Equipment '{equipment_id}' not found for your company.")
+
+    limit = min(max(1, req.limit), 10)
+
+    def _do_retrieval():
+        result = retrieve_with_trace(
+            company_id=admin.company_id,
+            equipment_id=equipment_id,
+            query_text=req.query,
+            limit=limit,
+        )
+        source_ids = resolve_source_ids(admin.company_id, equipment_id)
+        meta = resolve_source_metadata(admin.company_id, source_ids)
+        return result, source_ids, meta
+
+    import asyncio as _asyncio
+    loop = _asyncio.get_event_loop()
+    result, source_ids, meta = await loop.run_in_executor(None, _do_retrieval)
+
+    trace = result.get("trace", {})
+
+    return {
+        "equipment_id": equipment_id,
+        "query": req.query,
+        "eligible_reference_source_ids": source_ids,
+        "eligible_sources": [
+            {"id": m["id"], "title": m["title"], "scope": m["scope"], "category": m["category"]}
+            for m in meta
+        ],
+        "hits": trace.get("retrieved_hits", []),
+    }
 
 
 # ── Admin CRUD — Escalation ────────────────────────────────────────
